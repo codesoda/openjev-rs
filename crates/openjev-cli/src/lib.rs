@@ -34,6 +34,14 @@ pub struct CliError {
     unparsed: bool,
 }
 
+impl std::fmt::Display for CliError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CliError {}
+
 impl CliError {
     pub fn validation(message: impl Into<String>) -> Self {
         Self {
@@ -210,10 +218,16 @@ fn execute<R: Read, W: Write, E: Write>(
             reject_pretty_multi(pretty, items.len())?;
             commands::check_require_shared(&cli.global, requested_mode)?;
             let config = commands::scoring_config(&cli.global)?;
-            warn_fallback(stderr, requested_mode)?;
             let group_id =
                 (items.len() > 1).then(|| format!("openjev-group-{}", std::process::id()));
-            let rows = score_all(&config, &items, requested_mode, group_id.as_deref())?;
+            let rows = score_all(
+                &config,
+                &items,
+                requested_mode,
+                group_id.as_deref(),
+                cli.global.require_shared,
+                stderr,
+            )?;
             write_rows(stdout, &rows, pretty)?;
             Ok(0)
         }
@@ -222,7 +236,7 @@ fn execute<R: Read, W: Write, E: Write>(
             let item = commands::noul_item(args, state)?;
             commands::check_require_shared(&cli.global, ExecutionMode::Direct)?;
             let config = commands::scoring_config(&cli.global)?;
-            let rows = score_all(&config, &[item], ExecutionMode::Direct, None)?;
+            let rows = score_all(&config, &[item], ExecutionMode::Direct, None, false, stderr)?;
             write_rows(stdout, &rows, pretty)?;
             Ok(0)
         }
@@ -231,7 +245,7 @@ fn execute<R: Read, W: Write, E: Write>(
             let item = commands::score_item(args, state)?;
             commands::check_require_shared(&cli.global, ExecutionMode::Direct)?;
             let config = commands::scoring_config(&cli.global)?;
-            let rows = score_all(&config, &[item], ExecutionMode::Direct, None)?;
+            let rows = score_all(&config, &[item], ExecutionMode::Direct, None, false, stderr)?;
             write_rows(stdout, &rows, pretty)?;
             Ok(0)
         }
@@ -245,7 +259,7 @@ fn execute<R: Read, W: Write, E: Write>(
             let item = Adapter::Choice(decision);
             commands::check_require_shared(&cli.global, ExecutionMode::Direct)?;
             let config = commands::scoring_config(&cli.global)?;
-            let rows = score_all(&config, &[item], ExecutionMode::Direct, None)?;
+            let rows = score_all(&config, &[item], ExecutionMode::Direct, None, false, stderr)?;
             write_rows(stdout, &rows, pretty)?;
             Ok(0)
         }
@@ -266,11 +280,11 @@ fn execute<R: Read, W: Write, E: Write>(
                 commands::preflight_output(path, args.input.as_deref())?;
             }
             let config = commands::scoring_config(&cli.global)?;
-            warn_fallback(stderr, requested_mode)?;
             execute_run(
                 &config,
                 rows,
                 requested_mode,
+                cli.global.require_shared,
                 args.output.as_deref(),
                 stdout,
                 stderr,
@@ -295,17 +309,14 @@ fn execute<R: Read, W: Write, E: Write>(
                     .map_err(|error| CliError::runtime("output_io", error.to_string()))?;
                 Ok(0)
             }
-            ModelsCommand::Probe { .. } => {
+            ModelsCommand::Probe { id, mode } => {
                 if cli.global.model.is_some() {
                     return Err(CliError::validation(
                         "use the models probe positional ID instead of global --model",
                     ));
                 }
                 commands::reject_unimplemented_postprocessing(&cli.global)?;
-                Err(CliError::runtime(
-                    "not_implemented",
-                    "models probe shared/batch is an M5 surface and is not implemented in M4",
-                ))
+                models_probe(&cli.global, &id, mode, stdout, stderr)
             }
         },
         Command::Eval(_) => {
@@ -368,26 +379,31 @@ fn validate_run_ids(rows: &[Decision]) -> Result<(), CliError> {
     Ok(())
 }
 
-fn warn_fallback(writer: &mut impl Write, mode: ExecutionMode) -> Result<(), CliError> {
-    if let Some(reason) = commands::fallback_reason(mode) {
-        writeln!(
-            writer,
-            "warning: requested {mode:?}; using serial full-prompt fallback: {reason}"
-        )
-        .map_err(|error| CliError::runtime("stderr_io", error.to_string()))?;
-    }
-    Ok(())
+fn warn_fallback_reason(
+    writer: &mut (impl Write + ?Sized),
+    mode: ExecutionMode,
+    reason: &str,
+) -> Result<(), CliError> {
+    writeln!(
+        writer,
+        "warning: requested {mode:?}; using fresh serial full-prompt fallback: {reason}"
+    )
+    .map_err(|error| CliError::runtime("stderr_io", error.to_string()))
 }
 
 fn execute_run<W: Write, E: Write>(
     config: &commands::ScoringConfig,
     decisions: Vec<Decision>,
     requested_mode: ExecutionMode,
+    require_shared: bool,
     output_path: Option<&std::path::Path>,
     stdout: &mut W,
     stderr: &mut E,
 ) -> Result<i32, CliError> {
     let items: Vec<_> = decisions.into_iter().map(Adapter::Choice).collect();
+    if require_shared {
+        require_shared_eligibility(config)?;
+    }
     // Input and output alias validation has already completed. Reserve the
     // create-only destination before model resolution/scoring so a racing
     // creator cannot cause inference whose rows have nowhere safe to go. If
@@ -397,22 +413,26 @@ fn execute_run<W: Write, E: Write>(
     let group_id = matches!(requested_mode, ExecutionMode::Shared | ExecutionMode::Batch)
         .then(|| format!("openjev-group-{}", std::process::id()));
     let outcome = if let Some(file) = output_file.as_mut() {
-        stream_run_and_shutdown(
+        execute_run_groups_and_shutdown(
             scorer.as_mut(),
             &items,
             requested_mode,
             config.confidence,
+            config.max_sequences,
             group_id.as_deref(),
+            require_shared,
             file,
             stderr,
         )?
     } else {
-        stream_run_and_shutdown(
+        execute_run_groups_and_shutdown(
             scorer.as_mut(),
             &items,
             requested_mode,
             config.confidence,
+            config.max_sequences,
             group_id.as_deref(),
+            require_shared,
             stdout,
             stderr,
         )?
@@ -432,12 +452,145 @@ fn execute_run<W: Write, E: Write>(
     Ok(i32::from(outcome.failed > 0))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn execute_run_groups_and_shutdown<W: Write + ?Sized, E: Write + ?Sized>(
+    scorer: &mut dyn DecisionScorer,
+    items: &[Adapter],
+    requested_mode: ExecutionMode,
+    confidence: bool,
+    max_sequences: u32,
+    group_id: Option<&str>,
+    require_shared: bool,
+    writer: &mut W,
+    stderr: &mut E,
+) -> Result<RunOutcome, CliError> {
+    let operation = (|| {
+        if !matches!(requested_mode, ExecutionMode::Shared | ExecutionMode::Batch) {
+            return stream_run_rows(
+                scorer,
+                items,
+                requested_mode,
+                confidence,
+                group_id,
+                commands::fallback_reason(requested_mode),
+                writer,
+                stderr,
+            );
+        }
+        let native_group_limit = match requested_mode {
+            ExecutionMode::Shared => max_sequences.saturating_sub(1).max(1),
+            ExecutionMode::Batch => max_sequences,
+            ExecutionMode::Direct | ExecutionMode::Serial => unreachable!(),
+        } as usize;
+        let mut outcome = RunOutcome {
+            written: 0,
+            failed: 0,
+        };
+        for group in items.chunks(native_group_limit) {
+            match attempt_native_group(scorer, group, requested_mode, confidence, group_id) {
+                Ok(rows) => {
+                    write_completed_group(writer, &rows)?;
+                    outcome.written += rows.len();
+                }
+                Err(reason) => {
+                    if require_shared && requested_mode == ExecutionMode::Shared {
+                        return Err(CliError::unsupported(format!(
+                            "--require-shared cannot be satisfied: {reason}"
+                        )));
+                    }
+                    warn_fallback_reason(stderr, requested_mode, &reason)?;
+                    let serial = stream_run_rows(
+                        scorer,
+                        group,
+                        requested_mode,
+                        confidence,
+                        group_id,
+                        Some(&reason),
+                        writer,
+                        stderr,
+                    )?;
+                    outcome.written += serial.written;
+                    outcome.failed += serial.failed;
+                }
+            }
+        }
+        Ok(outcome)
+    })();
+    let shutdown = scorer.shutdown();
+    match (operation, shutdown) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(outcome), Ok(())) => Ok(outcome),
+    }
+}
+
+fn attempt_native_group(
+    scorer: &mut dyn DecisionScorer,
+    items: &[Adapter],
+    mode: ExecutionMode,
+    confidence: bool,
+    group_id: Option<&str>,
+) -> Result<Vec<openjev_core::Readout>, String> {
+    let probe_id = scorer.probe_id(mode)?;
+    let decisions: Vec<_> = items.iter().map(|item| item.decision().clone()).collect();
+    let raw = match mode {
+        ExecutionMode::Shared => scorer.score_shared(decisions, probe_id.clone()),
+        ExecutionMode::Batch => scorer.score_batch(decisions, probe_id.clone()),
+        ExecutionMode::Direct | ExecutionMode::Serial => {
+            return Err("group dispatch requires shared or batch mode".to_owned());
+        }
+    }
+    .map_err(|error| {
+        format!(
+            "native {mode:?} attempt failed; tentative group discarded: {}",
+            error.message
+        )
+    })?;
+    if raw.len() != items.len() {
+        return Err(format!(
+            "native {mode:?} returned {} rows for {} inputs; tentative group discarded",
+            raw.len(),
+            items.len()
+        ));
+    }
+    raw.into_iter()
+        .zip(items)
+        .map(|(readout, item)| {
+            if readout.id != item.decision().id
+                || readout.execution.requested_mode != mode
+                || readout.execution.effective_mode != mode
+                || readout.execution.probe_id.as_deref() != Some(probe_id.as_str())
+            {
+                return Err(format!(
+                    "native {mode:?} result identity/metadata mismatch; tentative group discarded"
+                ));
+            }
+            commands::adapt_group_readout(item, readout, confidence, group_id)
+                .map_err(|error| format!("native {mode:?} adaptation failed: {}", error.message))
+        })
+        .collect()
+}
+
+fn write_completed_group<W: Write + ?Sized>(
+    writer: &mut W,
+    rows: &[openjev_core::Readout],
+) -> Result<(), CliError> {
+    // Shared/batch inference completes the bounded group (and all of its
+    // internal waves) before any row is observable. Once complete, preserve
+    // input order and flush each row.
+    for row in rows {
+        write_run_row(writer, row)?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RunOutcome {
     written: usize,
     failed: usize,
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn stream_run_and_shutdown<W: Write + ?Sized, E: Write + ?Sized>(
     scorer: &mut dyn DecisionScorer,
@@ -448,12 +601,37 @@ fn stream_run_and_shutdown<W: Write + ?Sized, E: Write + ?Sized>(
     writer: &mut W,
     stderr: &mut E,
 ) -> Result<RunOutcome, CliError> {
+    stream_run_and_shutdown_with_reason(
+        scorer,
+        items,
+        requested_mode,
+        confidence,
+        group_id,
+        commands::fallback_reason(requested_mode),
+        writer,
+        stderr,
+    )
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn stream_run_and_shutdown_with_reason<W: Write + ?Sized, E: Write + ?Sized>(
+    scorer: &mut dyn DecisionScorer,
+    items: &[Adapter],
+    requested_mode: ExecutionMode,
+    confidence: bool,
+    group_id: Option<&str>,
+    fallback_reason: Option<&str>,
+    writer: &mut W,
+    stderr: &mut E,
+) -> Result<RunOutcome, CliError> {
     let streamed = stream_run_rows(
         scorer,
         items,
         requested_mode,
         confidence,
         group_id,
+        fallback_reason,
         writer,
         stderr,
     );
@@ -472,6 +650,7 @@ fn stream_run_rows<W: Write + ?Sized, E: Write + ?Sized>(
     requested_mode: ExecutionMode,
     confidence: bool,
     group_id: Option<&str>,
+    fallback_reason: Option<&str>,
     writer: &mut W,
     stderr: &mut E,
 ) -> Result<RunOutcome, CliError> {
@@ -480,7 +659,14 @@ fn stream_run_rows<W: Write + ?Sized, E: Write + ?Sized>(
         failed: 0,
     };
     for item in items {
-        match commands::score_item_with(scorer, item, requested_mode, confidence, group_id) {
+        match commands::score_item_with_reason(
+            scorer,
+            item,
+            requested_mode,
+            confidence,
+            group_id,
+            fallback_reason,
+        ) {
             Ok(row) => write_run_row(writer, &row)?,
             Err(error) => {
                 outcome.failed += 1;
@@ -514,26 +700,97 @@ fn score_all(
     items: &[Adapter],
     requested_mode: ExecutionMode,
     group_id: Option<&str>,
+    require_shared: bool,
+    stderr: &mut (impl Write + ?Sized),
 ) -> Result<Vec<openjev_core::Readout>, CliError> {
+    if require_shared {
+        require_shared_eligibility(config)?;
+    }
     let mut scorer = load_scorer(config)?;
-    let result = items
-        .iter()
-        .map(|item| {
-            commands::score_item_with(
+    let result = if matches!(requested_mode, ExecutionMode::Shared | ExecutionMode::Batch) {
+        let group_limit = match requested_mode {
+            ExecutionMode::Shared => config.max_sequences.saturating_sub(1).max(1),
+            ExecutionMode::Batch => config.max_sequences,
+            ExecutionMode::Direct | ExecutionMode::Serial => unreachable!(),
+        } as usize;
+        let mut completed = Vec::with_capacity(items.len());
+        let mut failure = None;
+        for group in items.chunks(group_limit) {
+            match attempt_native_group(
                 scorer.as_mut(),
-                item,
+                group,
                 requested_mode,
                 config.confidence,
                 group_id,
-            )
-        })
-        .collect();
+            ) {
+                Ok(mut rows) => completed.append(&mut rows),
+                Err(reason) => {
+                    if require_shared && requested_mode == ExecutionMode::Shared {
+                        failure = Some(CliError::unsupported(format!(
+                            "--require-shared cannot be satisfied: {reason}"
+                        )));
+                        break;
+                    }
+                    if let Err(error) = warn_fallback_reason(stderr, requested_mode, &reason) {
+                        failure = Some(error);
+                        break;
+                    }
+                    for item in group {
+                        match commands::score_item_with_reason(
+                            scorer.as_mut(),
+                            item,
+                            requested_mode,
+                            config.confidence,
+                            group_id,
+                            Some(&reason),
+                        ) {
+                            Ok(row) => completed.push(row),
+                            Err(error) => {
+                                failure = Some(error);
+                                break;
+                            }
+                        }
+                    }
+                    if failure.is_some() {
+                        break;
+                    }
+                }
+            }
+        }
+        failure.map_or(Ok(completed), Err)
+    } else {
+        items
+            .iter()
+            .map(|item| {
+                commands::score_item_with_reason(
+                    scorer.as_mut(),
+                    item,
+                    requested_mode,
+                    config.confidence,
+                    group_id,
+                    None,
+                )
+            })
+            .collect()
+    };
     let shutdown = scorer.shutdown();
     match (result, shutdown) {
         (Err(error), _) => Err(error),
         (Ok(_), Err(error)) => Err(error),
         (Ok(rows), Ok(())) => Ok(rows),
     }
+}
+
+#[cfg(feature = "native")]
+fn require_shared_eligibility(config: &commands::ScoringConfig) -> Result<(), CliError> {
+    commands::require_probe_eligibility(config, openjev_llama::ProbeMode::Shared).map(|_| ())
+}
+
+#[cfg(not(feature = "native"))]
+fn require_shared_eligibility(_config: &commands::ScoringConfig) -> Result<(), CliError> {
+    Err(CliError::unsupported(
+        "--require-shared cannot be satisfied by a backend-disabled build",
+    ))
 }
 
 #[cfg(feature = "native")]
@@ -546,6 +803,181 @@ fn load_scorer(_config: &commands::ScoringConfig) -> Result<Box<dyn DecisionScor
     Err(CliError::runtime(
         "backend_unavailable",
         "production scoring requires building openjev-cli with native, metal, or cuda",
+    ))
+}
+
+#[cfg(feature = "native")]
+fn models_probe<W: Write, E: Write>(
+    global: &args::GlobalArgs,
+    id: &str,
+    mode: args::ProbeModeArg,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<i32, CliError> {
+    let mode = match mode {
+        args::ProbeModeArg::Shared => openjev_llama::ProbeMode::Shared,
+        args::ProbeModeArg::Batch => openjev_llama::ProbeMode::Batch,
+    };
+    if std::env::var("OPENJEV_PROBE_CHILD").as_deref() == Ok("1") {
+        let receipt = commands::run_probe_child(global, id, mode)?;
+        let enabled = receipt.passed;
+        let report = commands::ProbeCommandReport {
+            schema: "openjev-probe-report-v1".to_owned(),
+            process_status: "completed".to_owned(),
+            failure_reason: receipt.failure_reason.clone(),
+            receipt: Some(receipt),
+            receipt_path: None,
+            enabled,
+        };
+        output::write_json(stdout, &report, global.pretty)
+            .map_err(|error| CliError::runtime("output_io", error.to_string()))?;
+        return Ok(i32::from(!enabled));
+    }
+
+    // Establish the exact parent-owned key and suspend any prior passing
+    // authorization before a child can initialize llama.cpp or create a context.
+    // The held key lock serializes ordinary concurrent reprobes. Every early
+    // return below intentionally leaves suspension in place.
+    let publication = commands::prepare_probe_publication(global, id, mode)?;
+    let executable = std::env::current_exe()
+        .map_err(|error| CliError::runtime("probe_parent", error.to_string()))?;
+    let mut command = std::process::Command::new(executable);
+    append_probe_global_args(&mut command, global);
+    command
+        .args(["models", "probe", id, "--mode", mode.as_str()])
+        .env("OPENJEV_PROBE_CHILD", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let child = command
+        .output()
+        .map_err(|error| CliError::runtime("probe_parent", error.to_string()))?;
+    stderr
+        .write_all(&child.stderr)
+        .map_err(|error| CliError::runtime("stderr_io", error.to_string()))?;
+    let parsed = serde_json::from_slice::<commands::ProbeCommandReport>(&child.stdout).ok();
+    let mut report = if let Some(report) = parsed {
+        if report.schema != "openjev-probe-report-v1" {
+            commands::ProbeCommandReport {
+                schema: "openjev-probe-report-v1".to_owned(),
+                process_status: "invalid-child-report".to_owned(),
+                receipt: None,
+                receipt_path: None,
+                enabled: false,
+                failure_reason: Some("probe child returned an unexpected report schema".to_owned()),
+            }
+        } else {
+            report
+        }
+    } else {
+        let status = child.status.code().map_or_else(
+            || "terminated-by-signal".to_owned(),
+            |code| format!("exit-{code}"),
+        );
+        commands::ProbeCommandReport {
+            schema: "openjev-probe-report-v1".to_owned(),
+            process_status: status,
+            receipt: None,
+            receipt_path: None,
+            enabled: false,
+            failure_reason: Some(if child.stdout.is_empty() {
+                "probe child crashed or failed before producing a JSON report".to_owned()
+            } else {
+                "probe child produced malformed JSON; no success receipt was accepted".to_owned()
+            }),
+        }
+    };
+    report.enabled = false;
+    report.receipt_path = None;
+    if report.process_status == "completed"
+        && let Some(receipt) = report.receipt.clone()
+    {
+        if receipt.passed && !child.status.success() {
+            report.process_status = "child-nonzero-after-passing-report".to_owned();
+            report.failure_reason = Some(
+                "probe child did not exit successfully; its passing candidate was not published"
+                    .to_owned(),
+            );
+        } else {
+            match publication.publish_child_result(&receipt, child.status.success()) {
+                Ok(path) => {
+                    report.receipt_path = Some(path.display().to_string());
+                    report.enabled = receipt.passed && child.status.success();
+                }
+                Err(error) => {
+                    report.process_status = "invalid-child-report".to_owned();
+                    report.failure_reason = Some(format!(
+                        "probe child receipt was not published by the parent: {error}"
+                    ));
+                }
+            }
+        }
+    }
+    let enabled = report.enabled;
+    output::write_json(stdout, &report, global.pretty)
+        .map_err(|error| CliError::runtime("output_io", error.to_string()))?;
+    Ok(i32::from(!enabled))
+}
+
+#[cfg(feature = "native")]
+fn append_probe_global_args(command: &mut std::process::Command, global: &args::GlobalArgs) {
+    if let Some(value) = &global.model_sha256 {
+        command.args(["--model-sha256", value]);
+    }
+    if let Some(value) = global.template_profile {
+        command.args(["--template-profile", value.as_str()]);
+    }
+    if let Some(value) = &global.cache_dir {
+        command.arg("--cache-dir").arg(value);
+    }
+    if global.offline {
+        command.arg("--offline");
+    }
+    if let Some(value) = global.device {
+        command.args([
+            "--device",
+            match value {
+                args::DeviceArg::Cpu => "cpu",
+                args::DeviceArg::Metal => "metal",
+                args::DeviceArg::Cuda => "cuda",
+            },
+        ]);
+    }
+    if let Some(value) = &global.gpu_layers {
+        command.args(["--gpu-layers", value]);
+    }
+    for (name, value) in [
+        ("--threads", global.threads),
+        ("--n-ctx", global.n_ctx),
+        ("--max-tokens", global.max_tokens),
+        ("--max-context-tokens", global.max_context_tokens),
+        ("--n-batch", global.n_batch),
+        ("--n-ubatch", global.n_ubatch),
+        ("--max-sequences", global.max_sequences),
+    ] {
+        if let Some(value) = value {
+            command.arg(name).arg(value.to_string());
+        }
+    }
+    if global.pretty {
+        command.arg("--pretty");
+    }
+    if global.quiet {
+        command.arg("--quiet");
+    }
+}
+
+#[cfg(not(feature = "native"))]
+fn models_probe<W: Write, E: Write>(
+    _global: &args::GlobalArgs,
+    _id: &str,
+    _mode: args::ProbeModeArg,
+    _stdout: &mut W,
+    _stderr: &mut E,
+) -> Result<i32, CliError> {
+    Err(CliError::runtime(
+        "backend_unavailable",
+        "models probe requires building openjev-cli with native, metal, or cuda",
     ))
 }
 
@@ -650,13 +1082,13 @@ fn find_help_metadata(
 
 const fn build_identity() -> &'static str {
     if cfg!(feature = "cuda") {
-        "m4-native-cuda"
+        "m5-native-cuda"
     } else if cfg!(feature = "metal") {
-        "m4-native-metal"
+        "m5-native-metal"
     } else if cfg!(feature = "native") {
-        "m4-native-cpu"
+        "m5-native-cpu"
     } else {
-        "m4-backend-disabled"
+        "m5-backend-disabled"
     }
 }
 
@@ -771,23 +1203,26 @@ mod tests {
         assert_eq!(code, 2);
         assert_eq!(stderr["error"]["code"], "unsupported");
 
-        let (code, _, stderr) = invoke(&[
-            "openjev",
-            "--require-shared",
-            "decide",
-            "--question",
-            "q1",
-            "--question",
-            "q2",
-            "--option",
-            "a",
-            "--option",
-            "b",
-            "--state",
-            "s",
-        ]);
-        assert_eq!(code, 2);
-        assert_eq!(stderr["error"]["code"], "unsupported");
+        #[cfg(not(feature = "native"))]
+        {
+            let (code, _, stderr) = invoke(&[
+                "openjev",
+                "--require-shared",
+                "decide",
+                "--question",
+                "q1",
+                "--question",
+                "q2",
+                "--option",
+                "a",
+                "--option",
+                "b",
+                "--state",
+                "s",
+            ]);
+            assert_eq!(code, 2);
+            assert_eq!(stderr["error"]["code"], "unsupported");
+        }
     }
 
     #[test]
@@ -946,6 +1381,44 @@ mod tests {
             .collect();
         assert_eq!(rows[0]["id"], "row-1");
         assert_eq!(rows[1]["id"], "row-2");
+    }
+
+    #[test]
+    fn shared_run_streams_bounded_groups_and_falls_back_whole_group() {
+        let state = Arc::new(Mutex::new(StreamProbeState::default()));
+        let mut scorer = ProbeScorer {
+            state: Arc::clone(&state),
+            fail_output_on_call: None,
+        };
+        let mut writer = ProbeWriter {
+            state: Arc::clone(&state),
+        };
+        let mut stderr = Vec::new();
+
+        let outcome = execute_run_groups_and_shutdown(
+            &mut scorer,
+            &run_items(3),
+            ExecutionMode::Shared,
+            false,
+            2,
+            Some("bounded-group"),
+            false,
+            &mut writer,
+            &mut stderr,
+        )
+        .unwrap();
+
+        assert_eq!(outcome.written, 3);
+        assert_eq!(outcome.failed, 3);
+        assert_eq!(state.lock().unwrap().shutdowns, 1);
+        assert_eq!(
+            String::from_utf8(stderr)
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("fresh serial full-prompt fallback"))
+                .count(),
+            3
+        );
     }
 
     #[test]

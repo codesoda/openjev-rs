@@ -546,7 +546,7 @@ impl ModelCache {
         Ok(())
     }
 
-    fn remove_controlled_entry(&self, path: &Path, boundary: &Path) -> Result<()> {
+    pub(crate) fn remove_controlled_entry(&self, path: &Path, boundary: &Path) -> Result<()> {
         if !self.mutation_parent_contained(path, boundary)? {
             return Ok(());
         }
@@ -716,7 +716,7 @@ impl ModelCache {
         Ok(canonical)
     }
 
-    fn create_contained_dir(&self, boundary: &Path, directory: &Path) -> Result<()> {
+    pub(crate) fn create_contained_dir(&self, boundary: &Path, directory: &Path) -> Result<()> {
         if boundary != self.root && boundary.starts_with(&self.root) {
             self.create_contained_dir(&self.root, boundary)?;
         }

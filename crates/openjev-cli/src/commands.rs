@@ -1,11 +1,17 @@
 use std::{collections::HashSet, path::Path};
 
+#[cfg(feature = "native")]
+use openjev_core::Question;
 use openjev_core::{
     CONFIDENCE_STATUS, Decision, DecisionOption, Device, ExecutionMode, GpuLayersRequested, Noul,
     Readout, Score, ScoreLevel, StateValue, normalized_margin, python_json_dumps,
 };
 #[cfg(feature = "native")]
-use openjev_llama::CacheOptions;
+use openjev_llama::{
+    CacheOptions, MAX_ABS_SLOT_LOGIT, MAX_PROBABILITY_DELTA, NATIVE_PIN, PROBE_SUITE_VERSION,
+    ProbeCaseResult, ProbeCaseStatus, ProbeConfiguration, ProbeEligibility, ProbeMode,
+    ProbePublication, ProbeReceipt, begin_probe_publication, load_passing_receipt, probe_id,
+};
 use openjev_llama::{ModelCache, ModelRegistry, ModelSpec, validate_hub_identity, validate_sha256};
 use serde::Serialize;
 
@@ -14,9 +20,9 @@ use crate::{
     args::{DecideArgs, DeviceArg, GlobalArgs, ModeArg, NoulArgs, ScoreArgs},
 };
 
-pub const SHARED_FALLBACK_REASON: &str = "shared execution is not implemented or probed until M5";
+pub const SHARED_FALLBACK_REASON: &str = "no passing exact-configuration shared probe receipt";
 pub const BATCH_FALLBACK_REASON: &str =
-    "independent batch execution is not implemented or probed until M5";
+    "no passing exact-configuration independent-batch probe receipt";
 
 #[derive(Clone, Debug)]
 pub struct ScoringConfig {
@@ -31,6 +37,7 @@ pub struct ScoringConfig {
     pub max_context_tokens: u32,
     pub n_batch: u32,
     pub n_ubatch: u32,
+    pub max_sequences: u32,
     pub confidence: bool,
 }
 
@@ -61,6 +68,33 @@ impl Adapter {
 
 pub trait DecisionScorer {
     fn score_direct(&mut self, decision: Decision) -> Result<Readout, CliError>;
+
+    fn probe_id(&self, _mode: ExecutionMode) -> Result<String, String> {
+        Err("native shared/batch eligibility is unavailable".to_owned())
+    }
+
+    fn score_shared(
+        &mut self,
+        _decisions: Vec<Decision>,
+        _probe_id: String,
+    ) -> Result<Vec<Readout>, CliError> {
+        Err(CliError::runtime(
+            "shared_unavailable",
+            "scorer does not implement shared execution",
+        ))
+    }
+
+    fn score_batch(
+        &mut self,
+        _decisions: Vec<Decision>,
+        _probe_id: String,
+    ) -> Result<Vec<Readout>, CliError> {
+        Err(CliError::runtime(
+            "batch_unavailable",
+            "scorer does not implement batch execution",
+        ))
+    }
+
     fn shutdown(&mut self) -> Result<(), CliError> {
         Ok(())
     }
@@ -68,12 +102,12 @@ pub trait DecisionScorer {
 
 pub fn scoring_config(global: &GlobalArgs) -> Result<ScoringConfig, CliError> {
     reject_unimplemented_postprocessing(global)?;
-    if let Some(max_sequences) = global.max_sequences {
-        if max_sequences == 0 {
-            return Err(CliError::validation("--max-sequences must be positive"));
-        }
-        return Err(CliError::unsupported(
-            "--max-sequences becomes effective with M5 shared/batch execution",
+    if global.max_sequences == Some(0) {
+        return Err(CliError::validation("--max-sequences must be positive"));
+    }
+    if global.max_sequences.is_some_and(|value| value > 64) {
+        return Err(CliError::validation(
+            "--max-sequences must not exceed the validated v1 limit of 64",
         ));
     }
     let registry = ModelRegistry::bundled().map_err(CliError::from_backend_validation)?;
@@ -101,6 +135,7 @@ pub fn scoring_config(global: &GlobalArgs) -> Result<ScoringConfig, CliError> {
     let max_context_tokens = global.max_context_tokens.unwrap_or(32_768);
     let n_batch = global.n_batch.unwrap_or(512);
     let n_ubatch = global.n_ubatch.unwrap_or(512);
+    let max_sequences = global.max_sequences.unwrap_or(32);
     for (name, value) in [
         ("threads", threads),
         ("max-tokens", max_tokens),
@@ -143,6 +178,7 @@ pub fn scoring_config(global: &GlobalArgs) -> Result<ScoringConfig, CliError> {
         max_context_tokens,
         n_batch,
         n_ubatch,
+        max_sequences,
         confidence: global.confidence,
     })
 }
@@ -416,6 +452,24 @@ pub fn score_item_with(
     confidence: bool,
     group_id: Option<&str>,
 ) -> Result<Readout, CliError> {
+    score_item_with_reason(
+        scorer,
+        item,
+        requested_mode,
+        confidence,
+        group_id,
+        fallback_reason(requested_mode),
+    )
+}
+
+pub fn score_item_with_reason(
+    scorer: &mut dyn DecisionScorer,
+    item: &Adapter,
+    requested_mode: ExecutionMode,
+    confidence: bool,
+    group_id: Option<&str>,
+    fallback: Option<&str>,
+) -> Result<Readout, CliError> {
     let mut readout = scorer.score_direct(item.decision().clone())?;
     readout.execution.requested_mode = requested_mode;
     readout.execution.effective_mode = match requested_mode {
@@ -424,7 +478,14 @@ pub fn score_item_with(
             ExecutionMode::Serial
         }
     };
-    readout.execution.fallback_reason = fallback_reason(requested_mode).map(str::to_owned);
+    readout.execution.fallback_reason =
+        if readout.execution.requested_mode == readout.execution.effective_mode {
+            None
+        } else {
+            fallback.map(str::to_owned).or_else(|| {
+                Some("requested execution mode used serial full-prompt fallback".to_owned())
+            })
+        };
     readout.execution.group_id = group_id.map(str::to_owned);
     readout.model.serving_config = Some(
         match readout.execution.effective_mode {
@@ -435,6 +496,16 @@ pub fn score_item_with(
         }
         .to_owned(),
     );
+    adapt_group_readout(item, readout, confidence, group_id)
+}
+
+pub fn adapt_group_readout(
+    item: &Adapter,
+    mut readout: Readout,
+    confidence: bool,
+    group_id: Option<&str>,
+) -> Result<Readout, CliError> {
+    readout.execution.group_id = group_id.map(str::to_owned);
     let mut readout = item.adapt(readout)?;
     if confidence {
         readout.confidence =
@@ -452,9 +523,14 @@ pub fn check_require_shared(global: &GlobalArgs, mode: ExecutionMode) -> Result<
                 "--require-shared is only valid when shared mode is requested",
             ));
         }
-        return Err(CliError::unsupported(
-            "--require-shared cannot be satisfied before M5 shared execution and probes",
-        ));
+        if !cfg!(feature = "native") {
+            return Err(CliError::unsupported(
+                "--require-shared cannot be satisfied by a backend-disabled build",
+            ));
+        }
+        // Exact receipt eligibility is checked after artifact resolution but
+        // before the first inference call.
+        return Ok(());
     }
     Ok(())
 }
@@ -571,8 +647,8 @@ pub fn models_list(global: &GlobalArgs) -> Result<ModelsOutput, CliError> {
             cache_status,
             path,
             support_status: "registered-runtime-load-not-attempted-by-list",
-            shared_probe_status: "not-implemented-or-probed-until-m5",
-            batch_probe_status: "not-implemented-or-probed-until-m5",
+            shared_probe_status: "configuration-specific-local-receipt-required",
+            batch_probe_status: "configuration-specific-local-receipt-required",
         });
     }
     Ok(ModelsOutput {
@@ -621,8 +697,68 @@ pub(crate) fn reject_models_irrelevant(
 }
 
 #[cfg(feature = "native")]
+pub fn probe_configuration(
+    config: &ScoringConfig,
+    artifact_sha256: &str,
+    profile: openjev_core::PromptProfile,
+) -> ProbeConfiguration {
+    ProbeConfiguration {
+        artifact_sha256: artifact_sha256.to_owned(),
+        native_pin: NATIVE_PIN.to_owned(),
+        probe_suite_version: PROBE_SUITE_VERSION.to_owned(),
+        device: config.device,
+        gpu_layers_requested: config.gpu_layers,
+        offload_kqv: config.device != Device::Cpu,
+        op_offload: config.device != Device::Cpu,
+        threads: config.threads,
+        n_ctx: config.n_ctx,
+        max_tokens: config.max_tokens,
+        max_context_tokens: config.max_context_tokens,
+        n_batch: config.n_batch,
+        n_ubatch: config.n_ubatch,
+        n_seq_max: config.max_sequences,
+        kv_unified: true,
+        profile,
+    }
+}
+
+#[cfg(feature = "native")]
+pub fn require_probe_eligibility(
+    config: &ScoringConfig,
+    mode: ProbeMode,
+) -> Result<String, CliError> {
+    let registry = ModelRegistry::bundled().map_err(CliError::from_backend_runtime)?;
+    let cache = ModelCache::from_precedence(config.cache_dir.as_deref())
+        .map_err(CliError::from_backend_runtime)?;
+    let resolved = openjev_llama::resolve_model_spec(
+        &registry,
+        &cache,
+        &config.model,
+        CacheOptions {
+            offline: config.offline,
+            repair: false,
+        },
+    )
+    .map_err(CliError::from_backend_runtime)?;
+    let configuration = probe_configuration(
+        config,
+        resolved.model().artifact_sha256(),
+        resolved.model().profile(),
+    );
+    load_passing_receipt(&cache, resolved.model().id(), mode, &configuration)
+        .map(|eligibility| eligibility.probe_id().to_owned())
+        .map_err(|error| {
+            CliError::unsupported(format!(
+                "--require-shared requires a passing exact-configuration local receipt: {error}"
+            ))
+        })
+}
+
+#[cfg(feature = "native")]
 pub struct NativeScorer {
     engine: Option<openjev_llama::EngineHandle>,
+    shared_probe: Result<ProbeEligibility, String>,
+    batch_probe: Result<ProbeEligibility, String>,
 }
 
 #[cfg(feature = "native")]
@@ -641,6 +777,18 @@ impl NativeScorer {
             },
         )
         .map_err(CliError::from_backend_runtime)?;
+        let probe_configuration = probe_configuration(
+            config,
+            resolved.model().artifact_sha256(),
+            resolved.model().profile(),
+        );
+        let model_id = resolved.model().id().to_owned();
+        let eligibility = |mode| {
+            load_passing_receipt(&cache, &model_id, mode, &probe_configuration)
+                .map_err(|error| error.to_string())
+        };
+        let shared_probe = eligibility(ProbeMode::Shared);
+        let batch_probe = eligibility(ProbeMode::Batch);
         let options = openjev_llama::EngineOptions {
             device: config.device,
             gpu_layers: config.gpu_layers,
@@ -650,6 +798,7 @@ impl NativeScorer {
             max_context_tokens: config.max_context_tokens,
             n_batch: config.n_batch,
             n_ubatch: config.n_ubatch,
+            max_sequences: config.max_sequences,
         };
         options
             .validate()
@@ -659,6 +808,8 @@ impl NativeScorer {
             .map_err(CliError::from_backend_runtime)?;
         Ok(Self {
             engine: Some(engine),
+            shared_probe,
+            batch_probe,
         })
     }
 }
@@ -670,6 +821,78 @@ impl DecisionScorer for NativeScorer {
             .as_ref()
             .ok_or_else(|| CliError::runtime("worker", "owner worker is shut down"))?
             .score_direct(decision)
+            .map_err(CliError::from_backend_runtime)
+    }
+
+    fn probe_id(&self, mode: ExecutionMode) -> Result<String, String> {
+        match mode {
+            ExecutionMode::Shared => self
+                .shared_probe
+                .as_ref()
+                .map(|eligibility| eligibility.probe_id().to_owned())
+                .map_err(Clone::clone),
+            ExecutionMode::Batch => self
+                .batch_probe
+                .as_ref()
+                .map(|eligibility| eligibility.probe_id().to_owned())
+                .map_err(Clone::clone),
+            ExecutionMode::Direct | ExecutionMode::Serial => {
+                Err("direct/serial execution does not use a probe receipt".to_owned())
+            }
+        }
+    }
+
+    fn score_shared(
+        &mut self,
+        decisions: Vec<Decision>,
+        probe_id: String,
+    ) -> Result<Vec<Readout>, CliError> {
+        let state = decisions
+            .first()
+            .ok_or_else(|| CliError::validation("shared group must not be empty"))?
+            .state
+            .clone();
+        let questions = decisions
+            .into_iter()
+            .map(|decision| Question::new(decision.id, decision.question, decision.options))
+            .collect::<openjev_core::types::Result<Vec<_>>>()
+            .map_err(CliError::from_core_validation)?;
+        let eligibility = self
+            .shared_probe
+            .as_ref()
+            .map_err(|reason| CliError::runtime("shared_unavailable", reason.clone()))?;
+        if eligibility.probe_id() != probe_id {
+            return Err(CliError::runtime(
+                "shared_unavailable",
+                "selected shared receipt ID changed before dispatch",
+            ));
+        }
+        self.engine
+            .as_ref()
+            .ok_or_else(|| CliError::runtime("worker", "owner worker is shut down"))?
+            .score_shared(state, questions, eligibility.clone())
+            .map_err(CliError::from_backend_runtime)
+    }
+
+    fn score_batch(
+        &mut self,
+        decisions: Vec<Decision>,
+        probe_id: String,
+    ) -> Result<Vec<Readout>, CliError> {
+        let eligibility = self
+            .batch_probe
+            .as_ref()
+            .map_err(|reason| CliError::runtime("batch_unavailable", reason.clone()))?;
+        if eligibility.probe_id() != probe_id {
+            return Err(CliError::runtime(
+                "batch_unavailable",
+                "selected batch receipt ID changed before dispatch",
+            ));
+        }
+        self.engine
+            .as_ref()
+            .ok_or_else(|| CliError::runtime("worker", "owner worker is shut down"))?
+            .score_batch(decisions, eligibility.clone())
             .map_err(CliError::from_backend_runtime)
     }
 
@@ -732,6 +955,406 @@ pub fn models_resolve(
         .to_owned(),
         cache_hit: artifact.cache_hit,
     })
+}
+
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct ProbeCommandReport {
+    pub schema: String,
+    pub process_status: String,
+    pub receipt: Option<ProbeReceipt>,
+    pub receipt_path: Option<String>,
+    pub enabled: bool,
+    pub failure_reason: Option<String>,
+}
+
+#[cfg(feature = "native")]
+struct OwnedProbeCase {
+    id: &'static str,
+    decisions: Vec<Decision>,
+    repeats: usize,
+    require_over_512: bool,
+}
+
+#[cfg(feature = "native")]
+pub fn run_probe_child(
+    global: &GlobalArgs,
+    id: &str,
+    mode: ProbeMode,
+) -> Result<ProbeReceipt, CliError> {
+    if std::env::var("OPENJEV_INTERNAL_PROBE_CRASH").as_deref() == Ok("1") {
+        std::process::abort();
+    }
+    let mut selected = global.clone();
+    selected.model = Some(id.to_owned());
+    let config = scoring_config(&selected)?;
+    let registry = ModelRegistry::bundled().map_err(CliError::from_backend_runtime)?;
+    let cache = ModelCache::from_precedence(config.cache_dir.as_deref())
+        .map_err(CliError::from_backend_runtime)?;
+    let resolved = openjev_llama::resolve_model_spec(
+        &registry,
+        &cache,
+        &config.model,
+        CacheOptions {
+            offline: config.offline,
+            repair: false,
+        },
+    )
+    .map_err(CliError::from_backend_runtime)?;
+    let model_id = resolved.model().id().to_owned();
+    let configuration = probe_configuration(
+        &config,
+        resolved.model().artifact_sha256(),
+        resolved.model().profile(),
+    );
+    let expected_probe_id =
+        probe_id(mode, &configuration).map_err(CliError::from_backend_runtime)?;
+    let options = openjev_llama::EngineOptions {
+        device: config.device,
+        gpu_layers: config.gpu_layers,
+        threads: config.threads,
+        n_ctx: config.n_ctx,
+        max_tokens: config.max_tokens,
+        max_context_tokens: config.max_context_tokens,
+        n_batch: config.n_batch,
+        n_ubatch: config.n_ubatch,
+        max_sequences: config.max_sequences,
+    };
+    let (model, artifact) = resolved.into_parts();
+    let engine = openjev_llama::EngineHandle::spawn_resolved(model, artifact, options)
+        .map_err(CliError::from_backend_runtime)?;
+    let cases = probe_cases(&config, mode)?;
+    let mut results = Vec::with_capacity(cases.len());
+    let mut decisive_failure = None;
+    for case in cases {
+        if let Some(reason) = &decisive_failure {
+            results.push(ProbeCaseResult {
+                id: case.id.to_owned(),
+                status: ProbeCaseStatus::UnrunAfterDecisiveFailure,
+                rows: 0,
+                max_abs_slot_logit: None,
+                max_probability_delta: None,
+                same_first_argmax: None,
+                detail: Some(format!("not run after decisive failure: {reason}")),
+            });
+            continue;
+        }
+        match run_one_probe_case(&engine, mode, &expected_probe_id, &case) {
+            Ok(result) if result.status == ProbeCaseStatus::Passed => results.push(result),
+            Ok(result) => {
+                decisive_failure = result.detail.clone();
+                results.push(result);
+            }
+            Err(error) => {
+                let reason = error.to_string();
+                decisive_failure = Some(reason.clone());
+                results.push(ProbeCaseResult {
+                    id: case.id.to_owned(),
+                    status: ProbeCaseStatus::Failed,
+                    rows: 0,
+                    max_abs_slot_logit: None,
+                    max_probability_delta: None,
+                    same_first_argmax: None,
+                    detail: Some(reason),
+                });
+            }
+        }
+    }
+    let shutdown_error = engine.shutdown().err().map(|error| error.to_string());
+    let failure_reason = shutdown_error.or(decisive_failure);
+    ProbeReceipt::new(model_id, mode, configuration, results, failure_reason)
+        .map_err(CliError::from_backend_runtime)
+}
+
+#[cfg(feature = "native")]
+pub fn prepare_probe_publication(
+    global: &GlobalArgs,
+    id: &str,
+    mode: ProbeMode,
+) -> Result<ProbePublication, CliError> {
+    let mut selected = global.clone();
+    selected.model = Some(id.to_owned());
+    let config = scoring_config(&selected)?;
+    let registry = ModelRegistry::bundled().map_err(CliError::from_backend_runtime)?;
+    let cache = ModelCache::from_precedence(config.cache_dir.as_deref())
+        .map_err(CliError::from_backend_runtime)?;
+    // This resolves and verifies only model identity/artifact bytes. It does not
+    // initialize llama.cpp, load a model, or create a context in the parent.
+    let resolved = openjev_llama::resolve_model_spec(
+        &registry,
+        &cache,
+        &config.model,
+        CacheOptions {
+            offline: config.offline,
+            repair: false,
+        },
+    )
+    .map_err(CliError::from_backend_runtime)?;
+    let expected = probe_configuration(
+        &config,
+        resolved.model().artifact_sha256(),
+        resolved.model().profile(),
+    );
+    begin_probe_publication(&cache, resolved.model().id(), mode, &expected)
+        .map_err(CliError::from_backend_runtime)
+}
+
+#[cfg(feature = "native")]
+fn run_one_probe_case(
+    engine: &openjev_llama::EngineHandle,
+    mode: ProbeMode,
+    probe_id: &str,
+    case: &OwnedProbeCase,
+) -> Result<ProbeCaseResult, CliError> {
+    let mut baseline = Vec::with_capacity(case.decisions.len());
+    for decision in &case.decisions {
+        baseline.push(
+            engine
+                .score_direct(decision.clone())
+                .map_err(CliError::from_backend_runtime)?,
+        );
+    }
+    if case.require_over_512 && baseline.iter().all(|row| row.input_tokens <= 512) {
+        return Ok(ProbeCaseResult {
+            id: case.id.to_owned(),
+            status: ProbeCaseStatus::Failed,
+            rows: u32::try_from(case.decisions.len()).unwrap_or(u32::MAX),
+            max_abs_slot_logit: None,
+            max_probability_delta: None,
+            same_first_argmax: None,
+            detail: Some(
+                "owned long case did not produce a full prompt over 512 tokens".to_owned(),
+            ),
+        });
+    }
+    let mut max_logit = 0.0_f64;
+    let mut max_probability = 0.0_f64;
+    let mut same_argmax = true;
+    for _ in 0..case.repeats {
+        let candidate = match mode {
+            ProbeMode::Shared => {
+                let state = case.decisions[0].state.clone();
+                if case.decisions.iter().any(|row| row.state != state) {
+                    return Err(CliError::validation(
+                        "owned shared probe case contains nonidentical states",
+                    ));
+                }
+                let questions = case
+                    .decisions
+                    .iter()
+                    .map(|row| {
+                        Question::new(row.id.clone(), row.question.clone(), row.options.clone())
+                    })
+                    .collect::<openjev_core::types::Result<Vec<_>>>()
+                    .map_err(CliError::from_core_validation)?;
+                engine
+                    .probe_shared_candidate(state, questions, probe_id.to_owned())
+                    .map_err(CliError::from_backend_runtime)?
+            }
+            ProbeMode::Batch => engine
+                .probe_batch_candidate(case.decisions.clone(), probe_id.to_owned())
+                .map_err(CliError::from_backend_runtime)?,
+        };
+        if candidate.len() != baseline.len()
+            || candidate
+                .iter()
+                .zip(&baseline)
+                .any(|(actual, direct)| actual.id != direct.id)
+        {
+            return Ok(ProbeCaseResult {
+                id: case.id.to_owned(),
+                status: ProbeCaseStatus::Failed,
+                rows: u32::try_from(case.decisions.len()).unwrap_or(u32::MAX),
+                max_abs_slot_logit: None,
+                max_probability_delta: None,
+                same_first_argmax: Some(false),
+                detail: Some("output order or identity differs from direct baseline".to_owned()),
+            });
+        }
+        for (actual, direct) in candidate.iter().zip(&baseline) {
+            if actual.option_logits.len() != direct.option_logits.len()
+                || actual.probabilities.len() != direct.probabilities.len()
+            {
+                return Err(CliError::runtime(
+                    "probe",
+                    "candidate/direct vector lengths differ",
+                ));
+            }
+            for (left, right) in actual.option_logits.iter().zip(&direct.option_logits) {
+                max_logit = max_logit.max((left - right).abs());
+            }
+            for (left, right) in actual.probabilities.iter().zip(&direct.probabilities) {
+                max_probability = max_probability.max((left - right).abs());
+            }
+            same_argmax &= actual.choice_index == direct.choice_index;
+        }
+    }
+    let passed =
+        max_logit <= MAX_ABS_SLOT_LOGIT && max_probability <= MAX_PROBABILITY_DELTA && same_argmax;
+    Ok(ProbeCaseResult {
+        id: case.id.to_owned(),
+        status: if passed {
+            ProbeCaseStatus::Passed
+        } else {
+            ProbeCaseStatus::Failed
+        },
+        rows: u32::try_from(case.decisions.len()).unwrap_or(u32::MAX),
+        max_abs_slot_logit: Some(max_logit),
+        max_probability_delta: Some(max_probability),
+        same_first_argmax: Some(same_argmax),
+        detail: (!passed).then(|| {
+            format!(
+                "frozen tolerance failure: max_abs_slot_logit={max_logit}, max_probability_delta={max_probability}, same_first_argmax={same_argmax}"
+            )
+        }),
+    })
+}
+
+#[cfg(feature = "native")]
+fn probe_cases(config: &ScoringConfig, mode: ProbeMode) -> Result<Vec<OwnedProbeCase>, CliError> {
+    let binary = probe_options(2);
+    let ternary = probe_options(3);
+    let sixteen = probe_options(16);
+    let short = StateValue::string("probe short state").map_err(CliError::from_core_validation)?;
+    let changed = StateValue::string("probe changed state with independent contents")
+        .map_err(CliError::from_core_validation)?;
+    let long_state = StateValue::string(format!(
+        "long owned evidence {}",
+        "evidence-segment ".repeat(700)
+    ))
+    .map_err(CliError::from_core_validation)?;
+    let suffix_words = usize::try_from(config.n_batch)
+        .unwrap_or(512)
+        .saturating_add(160)
+        .min(2_000);
+    let long_question = format!(
+        "Evaluate this deliberately long ragged criterion: {}",
+        "criterion-segment ".repeat(suffix_words)
+    );
+    let one = vec![probe_decision(
+        "binary-1",
+        short.clone(),
+        "short binary",
+        binary.clone(),
+    )?];
+    let ragged = vec![
+        probe_decision(
+            "ragged-1",
+            short.clone(),
+            "short three-way",
+            ternary.clone(),
+        )?,
+        probe_decision("ragged-2", short.clone(), &long_question, ternary.clone())?,
+    ];
+    let many = (1..=21)
+        .map(|index| {
+            let state = if mode == ProbeMode::Batch {
+                StateValue::string(format!(
+                    "{} independent-batch-state-{index}",
+                    long_state.as_value().as_str().unwrap_or("owned long state")
+                ))
+                .map_err(CliError::from_core_validation)?
+            } else {
+                long_state.clone()
+            };
+            probe_decision(
+                &format!("wide-{index:02}"),
+                state,
+                &format!(
+                    "sixteen-way criterion {index} {}",
+                    "ragged ".repeat(index % 7)
+                ),
+                sixteen.clone(),
+            )
+        })
+        .collect::<Result<Vec<_>, CliError>>()?;
+    let changed_case = vec![
+        probe_decision(
+            "changed-1",
+            changed.clone(),
+            "changed state first",
+            binary.clone(),
+        )?,
+        probe_decision(
+            "changed-2",
+            if mode == ProbeMode::Batch {
+                StateValue::string("a second distinct independent batch state")
+                    .map_err(CliError::from_core_validation)?
+            } else {
+                changed
+            },
+            "changed state second",
+            binary.clone(),
+        )?,
+    ];
+    let cycles = (1..=config.max_sequences.saturating_add(1))
+        .map(|index| {
+            let state = if mode == ProbeMode::Batch {
+                StateValue::string(format!("independent cycle state {index}"))
+                    .map_err(CliError::from_core_validation)?
+            } else {
+                short.clone()
+            };
+            probe_decision(
+                &format!("cycle-{index:02}"),
+                state,
+                &format!("copy clear cycle {index}"),
+                binary.clone(),
+            )
+        })
+        .collect::<Result<Vec<_>, CliError>>()?;
+    Ok(vec![
+        OwnedProbeCase {
+            id: "binary-short-1-branch",
+            decisions: one,
+            repeats: 1,
+            require_over_512: false,
+        },
+        OwnedProbeCase {
+            id: "three-way-ragged-2-branches-multichunk",
+            decisions: ragged,
+            repeats: 1,
+            require_over_512: true,
+        },
+        OwnedProbeCase {
+            id: "sixteen-way-long-state-21-branches",
+            decisions: many,
+            repeats: 1,
+            require_over_512: true,
+        },
+        OwnedProbeCase {
+            id: "changed-state-isolation",
+            decisions: changed_case,
+            repeats: 1,
+            require_over_512: false,
+        },
+        OwnedProbeCase {
+            id: "repeated-copy-clear-cycles",
+            decisions: cycles,
+            repeats: 3,
+            require_over_512: false,
+        },
+    ])
+}
+
+#[cfg(feature = "native")]
+fn probe_options(count: usize) -> Vec<DecisionOption> {
+    (1..=count)
+        .map(|index| DecisionOption {
+            id: format!("option-{index}"),
+            description: format!("Owned deterministic option {index}"),
+        })
+        .collect()
+}
+
+#[cfg(feature = "native")]
+fn probe_decision(
+    id: &str,
+    state: StateValue,
+    question: &str,
+    options: Vec<DecisionOption>,
+) -> Result<Decision, CliError> {
+    Decision::new(id, state, question, options).map_err(CliError::from_core_validation)
 }
 
 #[cfg(test)]

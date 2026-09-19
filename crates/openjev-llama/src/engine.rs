@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fmt::Write as _,
     num::NonZeroU32,
     sync::{
@@ -20,14 +21,17 @@ use llama_cpp_2::{
 use openjev_core::{
     DIRECT_READOUT, Decision, Device, ExecutionMetadata, ExecutionMode, GpuLayersRequested,
     GpuLayersStatus, ModelMetadata, NativeReference, NumericReadout, PROBABILITY_STATUS, Primitive,
-    PromptProfile, Readout, SlotTokenizer, TemplateMetadataStatus, prepare_prompt, read_logits,
-    standard_limitations, verify_slots,
+    PromptProfile, Question, Readout, SharedTiming, SlotTokenizer, StateValue,
+    TemplateMetadataStatus, prepare_prompt, read_logits, standard_limitations, state_prefix_text,
+    verify_slots,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    BackendError, ModelEntry, Result, RuntimeModelSpec, VerifiedArtifact, cache::hash_file,
+    BackendError, ModelEntry, NATIVE_PIN, PROBE_SUITE_VERSION, ProbeConfiguration,
+    ProbeEligibility, ProbeMode, Result, RuntimeModelSpec, VerifiedArtifact, cache::hash_file,
+    probe_id,
 };
 
 const LLAMA_CPP_COMMIT: &str = "e79e4bf660e19f2ad851e06c6913f7a8c5852621";
@@ -43,6 +47,9 @@ pub struct EngineOptions {
     pub max_context_tokens: u32,
     pub n_batch: u32,
     pub n_ubatch: u32,
+    /// Maximum context sequence slots. Shared mode reserves slot 0 for the
+    /// immutable prefix, so at most `max_sequences - 1` branches are active.
+    pub max_sequences: u32,
 }
 
 impl EngineOptions {
@@ -53,12 +60,18 @@ impl EngineOptions {
             ("max_context_tokens", self.max_context_tokens),
             ("n_batch", self.n_batch),
             ("n_ubatch", self.n_ubatch),
+            ("max_sequences", self.max_sequences),
         ] {
             if value == 0 {
                 return Err(BackendError::Configuration(format!(
                     "{name} must be positive"
                 )));
             }
+        }
+        if self.max_sequences > 64 {
+            return Err(BackendError::Configuration(
+                "max_sequences must not exceed the validated v1 limit of 64".to_owned(),
+            ));
         }
         if self.n_ctx == Some(0) {
             return Err(BackendError::Configuration(
@@ -108,6 +121,7 @@ impl Default for EngineOptions {
             max_context_tokens: 32_768,
             n_batch: 512,
             n_ubatch: 512,
+            max_sequences: 32,
         }
     }
 }
@@ -242,6 +256,17 @@ enum Request {
         decision: Box<Decision>,
         response: SyncSender<Result<Readout>>,
     },
+    ScoreShared {
+        state: Box<StateValue>,
+        questions: Vec<Question>,
+        probe_id: String,
+        response: SyncSender<Result<Vec<Readout>>>,
+    },
+    ScoreBatch {
+        decisions: Vec<Decision>,
+        probe_id: String,
+        response: SyncSender<Result<Vec<Readout>>>,
+    },
     Smoke {
         decision: Box<Decision>,
         response: SyncSender<Result<DirectSmokeReport>>,
@@ -342,6 +367,95 @@ impl EngineHandle {
             .map_err(|_| BackendError::Worker("owner thread dropped its response".to_owned()))?
     }
 
+    /// Score questions against one immutable state prefix. The complete local
+    /// receipt must be passing; the owner thread also verifies its ID against
+    /// this engine's exact runtime configuration.
+    pub fn score_shared(
+        &self,
+        state: StateValue,
+        questions: Vec<Question>,
+        eligibility: ProbeEligibility,
+    ) -> Result<Vec<Readout>> {
+        if eligibility.mode() != ProbeMode::Shared {
+            return Err(BackendError::Configuration(
+                "shared execution requires a passing shared probe receipt".to_owned(),
+            ));
+        }
+        self.send_shared(state, questions, eligibility.probe_id().to_owned())
+    }
+
+    /// Execute one untrusted shared candidate only inside the isolated probe
+    /// child. This cannot authorize standard production scoring.
+    pub fn probe_shared_candidate(
+        &self,
+        state: StateValue,
+        questions: Vec<Question>,
+        expected_probe_id: String,
+    ) -> Result<Vec<Readout>> {
+        require_probe_child()?;
+        self.send_shared(state, questions, expected_probe_id)
+    }
+
+    fn send_shared(
+        &self,
+        state: StateValue,
+        questions: Vec<Question>,
+        probe_id: String,
+    ) -> Result<Vec<Readout>> {
+        let (sender, receiver) = sync_channel(1);
+        self.sender
+            .send(Request::ScoreShared {
+                state: Box::new(state),
+                questions,
+                probe_id,
+                response: sender,
+            })
+            .map_err(|_| BackendError::Worker("owner thread is unavailable".to_owned()))?;
+        receiver
+            .recv()
+            .map_err(|_| BackendError::Worker("owner thread dropped its response".to_owned()))?
+    }
+
+    /// Score unrelated full prompts in distinct native sequence IDs without
+    /// prefix sharing. The complete local receipt must be passing and exact.
+    pub fn score_batch(
+        &self,
+        decisions: Vec<Decision>,
+        eligibility: ProbeEligibility,
+    ) -> Result<Vec<Readout>> {
+        if eligibility.mode() != ProbeMode::Batch {
+            return Err(BackendError::Configuration(
+                "batch execution requires a passing batch probe receipt".to_owned(),
+            ));
+        }
+        self.send_batch(decisions, eligibility.probe_id().to_owned())
+    }
+
+    /// Execute one untrusted packed-batch candidate only inside the isolated
+    /// probe child. This cannot authorize standard production scoring.
+    pub fn probe_batch_candidate(
+        &self,
+        decisions: Vec<Decision>,
+        expected_probe_id: String,
+    ) -> Result<Vec<Readout>> {
+        require_probe_child()?;
+        self.send_batch(decisions, expected_probe_id)
+    }
+
+    fn send_batch(&self, decisions: Vec<Decision>, probe_id: String) -> Result<Vec<Readout>> {
+        let (sender, receiver) = sync_channel(1);
+        self.sender
+            .send(Request::ScoreBatch {
+                decisions,
+                probe_id,
+                response: sender,
+            })
+            .map_err(|_| BackendError::Worker("owner thread is unavailable".to_owned()))?;
+        receiver
+            .recv()
+            .map_err(|_| BackendError::Worker("owner thread dropped its response".to_owned()))?
+    }
+
     /// M2 diagnostic path: one unreported warmup pass followed by one measured pass.
     pub fn smoke_direct(&self, decision: Decision) -> Result<DirectSmokeReport> {
         let (sender, receiver) = sync_channel(1);
@@ -372,6 +486,16 @@ impl EngineHandle {
 fn join_owner_thread(join: JoinHandle<()>) -> Result<()> {
     join.join()
         .map_err(|_| BackendError::Worker("owner thread panicked".to_owned()))
+}
+
+fn require_probe_child() -> Result<()> {
+    if std::env::var("OPENJEV_PROBE_CHILD").as_deref() == Ok("1") {
+        Ok(())
+    } else {
+        Err(BackendError::Configuration(
+            "unverified native candidates are restricted to an isolated probe child".to_owned(),
+        ))
+    }
 }
 
 impl Drop for EngineHandle {
@@ -408,6 +532,27 @@ fn worker_main(
             }
             Request::Score { decision, response } => {
                 let result = score_direct(&backend, &model, &spec, &options, &info, &decision);
+                let _ = response.send(result);
+            }
+            Request::ScoreShared {
+                state,
+                questions,
+                probe_id,
+                response,
+            } => {
+                let result = score_shared_native(
+                    &backend, &model, &spec, &options, &info, &state, &questions, &probe_id,
+                );
+                let _ = response.send(result);
+            }
+            Request::ScoreBatch {
+                decisions,
+                probe_id,
+                response,
+            } => {
+                let result = score_batch_native(
+                    &backend, &model, &spec, &options, &info, &decisions, &probe_id,
+                );
                 let _ = response.send(result);
             }
             Request::Smoke { decision, response } => {
@@ -797,6 +942,901 @@ fn selected_device_name(info: &LoadedModelInfo) -> String {
     )
 }
 
+struct GroupEncoding {
+    decision: Decision,
+    encoded: EncodedPrompt,
+}
+
+struct GroupExecution {
+    numeric: Vec<NumericReadout>,
+    n_ctx_actual: u32,
+    n_batch_actual: u32,
+    n_ubatch_actual: u32,
+    waves: u32,
+    prefill_seconds: f64,
+    replicate_seconds: f64,
+    suffix_seconds: f64,
+}
+
+fn require_exact_probe_id(
+    spec: &RuntimeModelSpec,
+    options: &EngineOptions,
+    mode: ProbeMode,
+    supplied: &str,
+) -> Result<()> {
+    let configuration = ProbeConfiguration {
+        artifact_sha256: spec.sha256.clone(),
+        native_pin: NATIVE_PIN.to_owned(),
+        probe_suite_version: PROBE_SUITE_VERSION.to_owned(),
+        device: options.device,
+        gpu_layers_requested: options.gpu_layers,
+        offload_kqv: options.device != Device::Cpu,
+        op_offload: options.device != Device::Cpu,
+        threads: options.threads,
+        n_ctx: options.n_ctx,
+        max_tokens: options.max_tokens,
+        max_context_tokens: options.max_context_tokens,
+        n_batch: options.n_batch,
+        n_ubatch: options.n_ubatch,
+        n_seq_max: options.max_sequences,
+        kv_unified: true,
+        profile: spec.profile,
+    };
+    let expected = probe_id(mode, &configuration)?;
+    if supplied != expected {
+        return Err(BackendError::Configuration(format!(
+            "supplied probe ID does not authorize this exact {} configuration",
+            mode.as_str()
+        )));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn score_shared_native(
+    backend: &LlamaBackend,
+    model: &LlamaModel,
+    spec: &RuntimeModelSpec,
+    options: &EngineOptions,
+    info: &LoadedModelInfo,
+    state: &StateValue,
+    questions: &[Question],
+    probe_id: &str,
+) -> Result<Vec<Readout>> {
+    require_exact_probe_id(spec, options, ProbeMode::Shared, probe_id)?;
+    let total_started = Instant::now();
+    if questions.is_empty() {
+        return Err(BackendError::Configuration(
+            "shared scoring requires at least one question".to_owned(),
+        ));
+    }
+    if options.max_sequences < 2 {
+        return Err(BackendError::Configuration(
+            "shared scoring requires max_sequences >= 2 for prefix plus branch".to_owned(),
+        ));
+    }
+    let mut ids = HashSet::with_capacity(questions.len());
+    let encode_started = Instant::now();
+    let mut rows = Vec::with_capacity(questions.len());
+    for question in questions {
+        if !ids.insert(question.id.as_str()) {
+            return Err(BackendError::Configuration(format!(
+                "duplicate shared question ID {:?}",
+                question.id
+            )));
+        }
+        let decision = Decision::new(
+            question.id.clone(),
+            state.clone(),
+            question.question.clone(),
+            question.options.clone(),
+        )
+        .map_err(|error| BackendError::Core(error.to_string()))?;
+        let encoded = encode_direct_prompt(model, spec, info, &decision)?;
+        rows.push(GroupEncoding { decision, encoded });
+    }
+    let tokenizer = LlamaTokenizer { model };
+    let prefix = encode_state_prefix(&tokenizer, state, spec.profile)?;
+    let suffixes: Vec<Vec<u32>> = rows
+        .iter()
+        .map(|row| {
+            if !row.encoded.prompt_token_ids.starts_with(&prefix)
+                || row.encoded.prompt_token_ids.len() <= prefix.len()
+            {
+                return Err(BackendError::Core(format!(
+                    "full prompt for {:?} does not start with the exact nonempty state prefix",
+                    row.decision.id
+                )));
+            }
+            Ok(row.encoded.prompt_token_ids[prefix.len()..].to_vec())
+        })
+        .collect::<Result<_>>()?;
+    let encode_seconds = encode_started.elapsed().as_secs_f64();
+    let execution = run_shared_group(backend, model, options, &prefix, &suffixes, &rows)?;
+    let total_seconds = total_started.elapsed().as_secs_f64();
+    let prefix_sha256 = prefix_token_hash(&prefix);
+    let true_suffix_tokens =
+        suffixes.iter().try_fold(0_u64, |total, suffix| {
+            total
+                .checked_add(u64::try_from(suffix.len()).map_err(|_| {
+                    BackendError::Context("suffix token count exceeds u64".to_owned())
+                })?)
+                .ok_or_else(|| BackendError::Context("suffix token total overflow".to_owned()))
+        })?;
+    let timing = SharedTiming {
+        total_seconds,
+        encode_seconds,
+        prefix_tokens: u64::try_from(prefix.len())
+            .map_err(|_| BackendError::Context("prefix token count exceeds u64".to_owned()))?,
+        prefill_seconds: execution.prefill_seconds,
+        replicate_seconds: execution.replicate_seconds,
+        suffix_forward_seconds: execution.suffix_seconds,
+        batch_size: u64::try_from(rows.len())
+            .map_err(|_| BackendError::Context("shared batch size exceeds u64".to_owned()))?,
+        true_suffix_tokens,
+        padded_suffix_tokens: true_suffix_tokens,
+    };
+    rows.into_iter()
+        .zip(execution.numeric)
+        .map(|(row, numeric)| {
+            build_group_readout(
+                spec,
+                options,
+                info,
+                row,
+                numeric,
+                ExecutionMode::Shared,
+                probe_id,
+                execution.n_ctx_actual,
+                execution.n_batch_actual,
+                execution.n_ubatch_actual,
+                execution.waves,
+                Some((&prefix, &prefix_sha256, &timing)),
+            )
+        })
+        .collect()
+}
+
+fn score_batch_native(
+    backend: &LlamaBackend,
+    model: &LlamaModel,
+    spec: &RuntimeModelSpec,
+    options: &EngineOptions,
+    info: &LoadedModelInfo,
+    decisions: &[Decision],
+    probe_id: &str,
+) -> Result<Vec<Readout>> {
+    require_exact_probe_id(spec, options, ProbeMode::Batch, probe_id)?;
+    if decisions.is_empty() {
+        return Err(BackendError::Configuration(
+            "batch scoring requires at least one decision".to_owned(),
+        ));
+    }
+    let mut ids = HashSet::with_capacity(decisions.len());
+    let rows: Vec<_> = decisions
+        .iter()
+        .map(|decision| {
+            if !ids.insert(decision.id.as_str()) {
+                return Err(BackendError::Configuration(format!(
+                    "duplicate batch decision ID {:?}",
+                    decision.id
+                )));
+            }
+            Ok(GroupEncoding {
+                decision: decision.clone(),
+                encoded: encode_direct_prompt(model, spec, info, decision)?,
+            })
+        })
+        .collect::<Result<_>>()?;
+    let sequences: Vec<Vec<u32>> = rows
+        .iter()
+        .map(|row| row.encoded.prompt_token_ids.clone())
+        .collect();
+    let execution = run_independent_batch(backend, model, options, &sequences, &rows)?;
+    rows.into_iter()
+        .zip(execution.numeric)
+        .map(|(row, numeric)| {
+            build_group_readout(
+                spec,
+                options,
+                info,
+                row,
+                numeric,
+                ExecutionMode::Batch,
+                probe_id,
+                execution.n_ctx_actual,
+                execution.n_batch_actual,
+                execution.n_ubatch_actual,
+                execution.waves,
+                None,
+            )
+        })
+        .collect()
+}
+
+fn run_shared_group(
+    backend: &LlamaBackend,
+    model: &LlamaModel,
+    options: &EngineOptions,
+    prefix: &[u32],
+    suffixes: &[Vec<u32>],
+    rows: &[GroupEncoding],
+) -> Result<GroupExecution> {
+    validate_group_lengths(model, options, rows)?;
+    let cap = context_cap(model, options)?;
+    let branch_limit = options
+        .max_sequences
+        .saturating_sub(1)
+        .min(options.n_batch)
+        .max(1) as usize;
+    let waves = plan_waves(prefix.len(), suffixes, cap, branch_limit)?;
+    let required = waves
+        .iter()
+        .map(|wave| {
+            prefix.len()
+                + wave
+                    .iter()
+                    .map(|index| suffixes[*index].len())
+                    .sum::<usize>()
+        })
+        .max()
+        .unwrap_or(prefix.len());
+    let n_ctx = choose_context(model, options, required)?;
+    let (mut context, n_batch, n_ubatch) =
+        new_group_context(backend, model, options, n_ctx, options.max_sequences)?;
+    let n_ctx_actual = context.n_ctx();
+    let mut batch = LlamaBatch::new(n_batch as usize, 1);
+    let prefill_started = Instant::now();
+    decode_single_sequence(&mut context, &mut batch, prefix, 0, 0, n_batch, false)?;
+    let prefill_seconds = prefill_started.elapsed().as_secs_f64();
+    let mut numeric: Vec<Option<NumericReadout>> = std::iter::repeat_with(|| None)
+        .take(suffixes.len())
+        .collect();
+    let mut replicate_seconds = 0.0;
+    let mut suffix_seconds = 0.0;
+    for wave in &waves {
+        let copy_started = Instant::now();
+        for (slot, _) in wave.iter().enumerate() {
+            context
+                .copy_kv_cache_seq(
+                    0,
+                    i32::try_from(slot + 1).map_err(|_| {
+                        BackendError::Context("branch sequence ID exceeds i32".to_owned())
+                    })?,
+                    None,
+                    None,
+                )
+                .map_err(|error| BackendError::Decode(error.to_string()))?;
+        }
+        replicate_seconds += copy_started.elapsed().as_secs_f64();
+        let work: Vec<_> = wave
+            .iter()
+            .enumerate()
+            .map(|(slot, index)| SequenceWork {
+                output_index: *index,
+                seq_id: i32::try_from(slot + 1).expect("bounded max_sequences fits i32"),
+                base_position: prefix.len(),
+                tokens: &suffixes[*index],
+                answer_token_ids: &rows[*index].encoded.answer_token_ids,
+            })
+            .collect();
+        let suffix_started = Instant::now();
+        decode_ragged_sequences(&mut context, &mut batch, n_batch, &work, &mut numeric)?;
+        suffix_seconds += suffix_started.elapsed().as_secs_f64();
+    }
+    let numeric = numeric
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value.ok_or_else(|| {
+                BackendError::Decode(format!("shared branch {index} produced no final logits"))
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok(GroupExecution {
+        numeric,
+        n_ctx_actual,
+        n_batch_actual: n_batch,
+        n_ubatch_actual: n_ubatch,
+        waves: u32::try_from(waves.len())
+            .map_err(|_| BackendError::Context("wave count exceeds u32".to_owned()))?,
+        prefill_seconds,
+        replicate_seconds,
+        suffix_seconds,
+    })
+}
+
+fn run_independent_batch(
+    backend: &LlamaBackend,
+    model: &LlamaModel,
+    options: &EngineOptions,
+    sequences: &[Vec<u32>],
+    rows: &[GroupEncoding],
+) -> Result<GroupExecution> {
+    validate_group_lengths(model, options, rows)?;
+    let cap = context_cap(model, options)?;
+    let branch_limit = options.max_sequences.min(options.n_batch).max(1) as usize;
+    let waves = plan_waves(0, sequences, cap, branch_limit)?;
+    let required = waves
+        .iter()
+        .map(|wave| wave.iter().map(|index| sequences[*index].len()).sum())
+        .max()
+        .unwrap_or(1);
+    let n_ctx = choose_context(model, options, required)?;
+    let (mut context, n_batch, n_ubatch) =
+        new_group_context(backend, model, options, n_ctx, options.max_sequences)?;
+    let n_ctx_actual = context.n_ctx();
+    let mut batch = LlamaBatch::new(n_batch as usize, 1);
+    let mut numeric: Vec<Option<NumericReadout>> = std::iter::repeat_with(|| None)
+        .take(sequences.len())
+        .collect();
+    let started = Instant::now();
+    for wave in &waves {
+        let work: Vec<_> = wave
+            .iter()
+            .enumerate()
+            .map(|(slot, index)| SequenceWork {
+                output_index: *index,
+                seq_id: i32::try_from(slot).expect("bounded max_sequences fits i32"),
+                base_position: 0,
+                tokens: &sequences[*index],
+                answer_token_ids: &rows[*index].encoded.answer_token_ids,
+            })
+            .collect();
+        decode_ragged_sequences(&mut context, &mut batch, n_batch, &work, &mut numeric)?;
+    }
+    let suffix_seconds = started.elapsed().as_secs_f64();
+    let numeric = numeric
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value.ok_or_else(|| {
+                BackendError::Decode(format!("batch sequence {index} produced no final logits"))
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok(GroupExecution {
+        numeric,
+        n_ctx_actual,
+        n_batch_actual: n_batch,
+        n_ubatch_actual: n_ubatch,
+        waves: u32::try_from(waves.len())
+            .map_err(|_| BackendError::Context("wave count exceeds u32".to_owned()))?,
+        prefill_seconds: 0.0,
+        replicate_seconds: 0.0,
+        suffix_seconds,
+    })
+}
+
+fn encode_state_prefix<T: SlotTokenizer>(
+    tokenizer: &T,
+    state: &StateValue,
+    profile: PromptProfile,
+) -> Result<Vec<u32>> {
+    let prefix_text =
+        state_prefix_text(state, profile).map_err(|error| BackendError::Core(error.to_string()))?;
+    let mut prefix = tokenizer
+        .tokenize_no_bos(&prefix_text)
+        .map_err(|error| BackendError::Core(error.to_string()))?;
+    if prefix.pop().is_none() || prefix.is_empty() {
+        return Err(BackendError::Core(
+            "shared state prefix must remain nonempty after dropping exactly one token".to_owned(),
+        ));
+    }
+    Ok(prefix)
+}
+
+struct SequenceWork<'a> {
+    output_index: usize,
+    seq_id: i32,
+    base_position: usize,
+    tokens: &'a [u32],
+    answer_token_ids: &'a [u32],
+}
+
+fn decode_ragged_sequences(
+    context: &mut llama_cpp_2::context::LlamaContext<'_>,
+    batch: &mut LlamaBatch<'_>,
+    n_batch: u32,
+    work: &[SequenceWork<'_>],
+    output: &mut [Option<NumericReadout>],
+) -> Result<()> {
+    let mut cursors = vec![0_usize; work.len()];
+    let lengths: Vec<_> = work.iter().map(|item| item.tokens.len()).collect();
+    while let Some((active, equal_take)) = ragged_step(&cursors, &lengths, n_batch as usize)? {
+        batch.clear();
+        let mut endings = Vec::new();
+        for index in active {
+            let item = &work[index];
+            for local in 0..equal_take {
+                let token_index = cursors[index] + local;
+                let position = item
+                    .base_position
+                    .checked_add(token_index)
+                    .ok_or_else(|| BackendError::Context("token position overflow".to_owned()))?;
+                let is_final = token_index + 1 == item.tokens.len();
+                let batch_offset = batch.n_tokens();
+                batch
+                    .add(
+                        LlamaToken(i32::try_from(item.tokens[token_index]).map_err(|_| {
+                            BackendError::Decode("token ID exceeds i32".to_owned())
+                        })?),
+                        i32::try_from(position).map_err(|_| {
+                            BackendError::Context("token position exceeds i32".to_owned())
+                        })?,
+                        &[item.seq_id],
+                        is_final,
+                    )
+                    .map_err(|error| BackendError::Decode(error.to_string()))?;
+                if is_final {
+                    endings.push((index, batch_offset));
+                }
+            }
+            cursors[index] += equal_take;
+        }
+        context
+            .decode(batch)
+            .map_err(|error| BackendError::Decode(error.to_string()))?;
+        for (index, local_offset) in endings {
+            let numeric = {
+                let vocabulary = context.get_logits_ith(local_offset);
+                let selected = select_option_logits(work[index].answer_token_ids, vocabulary)?;
+                read_logits(&selected, vocabulary)
+                    .map_err(|error| BackendError::Core(error.to_string()))?
+            };
+            output[work[index].output_index] = Some(numeric);
+            let seq_id = u32::try_from(work[index].seq_id)
+                .map_err(|_| BackendError::Decode("negative sequence ID".to_owned()))?;
+            let cleared = context
+                .clear_kv_cache_seq(Some(seq_id), None, None)
+                .map_err(|error| BackendError::Decode(error.to_string()))?;
+            require_sequence_clear(work[index].seq_id, cleared)?;
+        }
+    }
+    Ok(())
+}
+
+fn ragged_step(
+    cursors: &[usize],
+    lengths: &[usize],
+    n_batch: usize,
+) -> Result<Option<(Vec<usize>, usize)>> {
+    if cursors.len() != lengths.len() || n_batch == 0 {
+        return Err(BackendError::Configuration(
+            "ragged scheduler requires aligned lengths and a positive batch capacity".to_owned(),
+        ));
+    }
+    if cursors
+        .iter()
+        .zip(lengths)
+        .any(|(cursor, length)| cursor > length)
+    {
+        return Err(BackendError::Decode(
+            "ragged scheduler cursor exceeds its sequence length".to_owned(),
+        ));
+    }
+    let active: Vec<_> = cursors
+        .iter()
+        .zip(lengths)
+        .enumerate()
+        .filter_map(|(index, (cursor, length))| (*cursor < *length).then_some(index))
+        .collect();
+    if active.is_empty() {
+        return Ok(None);
+    }
+    if active.len() > n_batch {
+        return Err(BackendError::Context(
+            "active sequence count exceeds n_batch".to_owned(),
+        ));
+    }
+    let equal_take = active
+        .iter()
+        .map(|index| lengths[*index] - cursors[*index])
+        .min()
+        .expect("active scheduler set is nonempty")
+        .min(n_batch / active.len());
+    if equal_take == 0 {
+        return Err(BackendError::Decode(
+            "ragged scheduler made no progress".to_owned(),
+        ));
+    }
+    Ok(Some((active, equal_take)))
+}
+
+fn require_sequence_clear(seq_id: i32, cleared: bool) -> Result<()> {
+    if cleared {
+        Ok(())
+    } else {
+        Err(BackendError::Decode(format!(
+            "native full clear returned false for sequence {seq_id}"
+        )))
+    }
+}
+
+fn decode_single_sequence(
+    context: &mut llama_cpp_2::context::LlamaContext<'_>,
+    batch: &mut LlamaBatch<'_>,
+    tokens: &[u32],
+    seq_id: i32,
+    base_position: usize,
+    n_batch: u32,
+    final_logits: bool,
+) -> Result<Option<Vec<f32>>> {
+    let mut result = None;
+    for (chunk_index, chunk) in tokens.chunks(n_batch as usize).enumerate() {
+        batch.clear();
+        let start = chunk_index
+            .checked_mul(n_batch as usize)
+            .ok_or_else(|| BackendError::Context("token position overflow".to_owned()))?;
+        for (local, token) in chunk.iter().copied().enumerate() {
+            let absolute = start + local;
+            let final_token = final_logits && absolute + 1 == tokens.len();
+            batch
+                .add(
+                    LlamaToken(
+                        i32::try_from(token)
+                            .map_err(|_| BackendError::Decode("token ID exceeds i32".to_owned()))?,
+                    ),
+                    i32::try_from(base_position + absolute).map_err(|_| {
+                        BackendError::Context("token position exceeds i32".to_owned())
+                    })?,
+                    &[seq_id],
+                    final_token,
+                )
+                .map_err(|error| BackendError::Decode(error.to_string()))?;
+        }
+        context
+            .decode(batch)
+            .map_err(|error| BackendError::Decode(error.to_string()))?;
+        if final_logits && start + chunk.len() == tokens.len() {
+            result = Some(
+                context
+                    .get_logits_ith(i32::try_from(chunk.len() - 1).map_err(|_| {
+                        BackendError::Decode("chunk-local index exceeds i32".to_owned())
+                    })?)
+                    .to_vec(),
+            );
+        }
+    }
+    Ok(result)
+}
+
+fn select_option_logits(answer_token_ids: &[u32], vocabulary: &[f32]) -> Result<Vec<f32>> {
+    answer_token_ids
+        .iter()
+        .map(|token_id| {
+            vocabulary.get(*token_id as usize).copied().ok_or_else(|| {
+                BackendError::Decode(format!(
+                    "answer token ID {token_id} is outside copied vocabulary logits"
+                ))
+            })
+        })
+        .collect()
+}
+
+fn validate_group_lengths(
+    model: &LlamaModel,
+    options: &EngineOptions,
+    rows: &[GroupEncoding],
+) -> Result<()> {
+    for row in rows {
+        let length = u32::try_from(row.encoded.prompt_token_ids.len())
+            .map_err(|_| BackendError::Context("prompt length exceeds u32".to_owned()))?;
+        if length == 0 || length > options.max_tokens {
+            return Err(BackendError::Context(format!(
+                "prompt {:?} has {length} tokens; configured max_tokens is {}",
+                row.decision.id, options.max_tokens
+            )));
+        }
+        if length > model.n_ctx_train() {
+            return Err(BackendError::Context(format!(
+                "prompt {:?} has {length} tokens; model training context is {}",
+                row.decision.id,
+                model.n_ctx_train()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn context_cap(model: &LlamaModel, options: &EngineOptions) -> Result<usize> {
+    let cap = options.n_ctx.unwrap_or(options.max_context_tokens);
+    if cap > options.max_context_tokens || cap > model.n_ctx_train() {
+        return Err(BackendError::Context(format!(
+            "context cap {cap} exceeds configured/model limit {}/{}",
+            options.max_context_tokens,
+            model.n_ctx_train()
+        )));
+    }
+    usize::try_from(cap).map_err(|_| BackendError::Context("context cap overflow".to_owned()))
+}
+
+fn plan_waves(
+    base_tokens: usize,
+    sequences: &[Vec<u32>],
+    cap: usize,
+    branch_limit: usize,
+) -> Result<Vec<Vec<usize>>> {
+    if base_tokens > cap {
+        return Err(BackendError::Context(format!(
+            "shared prefix requires {base_tokens} cells; context cap is {cap}"
+        )));
+    }
+    let mut waves = Vec::new();
+    let mut current = Vec::new();
+    let mut occupied = base_tokens;
+    for (index, sequence) in sequences.iter().enumerate() {
+        let required = base_tokens
+            .checked_add(sequence.len())
+            .ok_or_else(|| BackendError::Context("context occupancy overflow".to_owned()))?;
+        if required > cap {
+            return Err(BackendError::Context(format!(
+                "sequence {index} requires {required} occupied cells; context cap is {cap}"
+            )));
+        }
+        let next = occupied
+            .checked_add(sequence.len())
+            .ok_or_else(|| BackendError::Context("context occupancy overflow".to_owned()))?;
+        if !current.is_empty() && (current.len() == branch_limit || next > cap) {
+            waves.push(std::mem::take(&mut current));
+            occupied = base_tokens;
+        }
+        occupied += sequence.len();
+        current.push(index);
+    }
+    if !current.is_empty() {
+        waves.push(current);
+    }
+    if waves.is_empty() {
+        return Err(BackendError::Configuration(
+            "group planner requires at least one sequence".to_owned(),
+        ));
+    }
+    Ok(waves)
+}
+
+fn choose_context(model: &LlamaModel, options: &EngineOptions, required: usize) -> Result<u32> {
+    let required = u32::try_from(required)
+        .map_err(|_| BackendError::Context("required context exceeds u32".to_owned()))?;
+    let selected = if let Some(explicit) = options.n_ctx {
+        if required > explicit {
+            return Err(BackendError::Context(format!(
+                "required occupancy {required} exceeds explicit n_ctx {explicit}"
+            )));
+        }
+        explicit
+    } else {
+        round_context(required.max(4096))?
+    };
+    if selected > options.max_context_tokens || selected > model.n_ctx_train() {
+        return Err(BackendError::Context(format!(
+            "required n_ctx {selected} exceeds configured/model limit {}/{}",
+            options.max_context_tokens,
+            model.n_ctx_train()
+        )));
+    }
+    Ok(selected)
+}
+
+fn new_group_context<'a>(
+    backend: &LlamaBackend,
+    model: &'a LlamaModel,
+    options: &EngineOptions,
+    n_ctx: u32,
+    n_seq_max: u32,
+) -> Result<(llama_cpp_2::context::LlamaContext<'a>, u32, u32)> {
+    let n_batch = options.n_batch.min(n_ctx).max(1);
+    let n_ubatch = options.n_ubatch.min(n_batch).max(1);
+    let threads = i32::try_from(options.threads)
+        .map_err(|_| BackendError::Configuration("threads exceeds i32::MAX".to_owned()))?;
+    let mut params = llama_cpp_2::context::params::LlamaContextParams::default()
+        .with_n_ctx(NonZeroU32::new(n_ctx))
+        .with_n_batch(n_batch)
+        .with_n_ubatch(n_ubatch)
+        .with_n_seq_max(n_seq_max)
+        .with_kv_unified(true)
+        .with_n_threads(threads)
+        .with_n_threads_batch(threads);
+    if options.device == Device::Cpu {
+        params = params.with_offload_kqv(false).with_op_offload(false);
+    }
+    let context = model
+        .new_context(backend, params)
+        .map_err(|error| BackendError::Context(error.to_string()))?;
+    let n_batch_actual = context.n_batch();
+    let n_ubatch_actual = context.n_ubatch();
+    Ok((context, n_batch_actual, n_ubatch_actual))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_group_readout(
+    spec: &RuntimeModelSpec,
+    options: &EngineOptions,
+    info: &LoadedModelInfo,
+    row: GroupEncoding,
+    numeric: NumericReadout,
+    mode: ExecutionMode,
+    probe_id: &str,
+    n_ctx_actual: u32,
+    n_batch_actual: u32,
+    n_ubatch_actual: u32,
+    waves: u32,
+    shared: Option<(&[u32], &str, &SharedTiming)>,
+) -> Result<Readout> {
+    let template_status = approved_template_status(info)?;
+    let choice_index = numeric.choice_index;
+    let run_id = format!(
+        "openjev-{}-{}",
+        std::process::id(),
+        RUN_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let (prefix_tokens, prefix_sha256, prefill_seconds, copy_seconds, suffix_seconds, timing) =
+        shared.map_or(
+            (None, None, None, None, None, None),
+            |(prefix, hash, timing)| {
+                (
+                    Some(prefix.len() as u64),
+                    Some(hash.to_owned()),
+                    Some(timing.prefill_seconds),
+                    Some(timing.replicate_seconds),
+                    Some(timing.suffix_forward_seconds),
+                    Some(timing.clone()),
+                )
+            },
+        );
+    let mut readout = Readout {
+        schema: "openjev-readout-v1".to_owned(),
+        id: row.encoded.id,
+        primitive: Primitive::Choice,
+        choice: row.encoded.option_ids[choice_index].clone(),
+        choice_index,
+        option_ids: row.encoded.option_ids,
+        probabilities: numeric.probabilities,
+        option_logits: numeric.option_logits,
+        answer_token_ids: row.encoded.answer_token_ids,
+        allowed_token_mass: numeric.allowed_token_mass,
+        full_vocab_argmax_id: numeric.full_vocab_argmax_id,
+        full_vocab_log_normalizer: numeric.full_vocab_log_normalizer,
+        input_tokens: row.encoded.prompt_token_ids.len() as u64,
+        forward_seconds: None,
+        total_seconds: None,
+        prompt_sha256: row.encoded.prompt_sha256,
+        prompt_version: row.encoded.prompt_version,
+        model: model_metadata(spec, info, template_status, mode),
+        readout: if mode == ExecutionMode::Shared {
+            "native selected suffix-position logits".to_owned()
+        } else {
+            DIRECT_READOUT.to_owned()
+        },
+        probability_status: PROBABILITY_STATUS.to_owned(),
+        limitations: standard_limitations(),
+        execution: ExecutionMetadata {
+            requested_mode: mode,
+            effective_mode: mode,
+            fallback_reason: None,
+            device: options.device,
+            device_name: selected_device_name(info),
+            gpu_layers_requested: options.gpu_layers,
+            gpu_layers_actual: info.gpu_layers_actual,
+            gpu_layers_status: info.gpu_layers_status,
+            threads: options.threads,
+            n_ctx_requested: options.n_ctx,
+            n_ctx_actual,
+            max_tokens: options.max_tokens,
+            n_batch: n_batch_actual,
+            n_ubatch: n_ubatch_actual,
+            n_seq_max: options.max_sequences,
+            kv_unified: true,
+            waves,
+            probe_id: Some(probe_id.to_owned()),
+            run_id,
+            group_id: None,
+        },
+        confidence: None,
+        confidence_status: None,
+        p_yes: None,
+        level_values: None,
+        expected_value: None,
+        argmax_level: None,
+        cache_hit: Some(mode == ExecutionMode::Shared),
+        prefix_tokens,
+        prefix_sha256,
+        prefill_seconds,
+        copy_seconds,
+        suffix_forward_seconds: suffix_seconds,
+        shared_timing: timing,
+        postprocess: None,
+    };
+    if mode == ExecutionMode::Batch {
+        readout.model.serving_config = Some("llama-independent-batch-v1".to_owned());
+    }
+    readout
+        .validate()
+        .map_err(|error| BackendError::Core(error.to_string()))?;
+    Ok(readout)
+}
+
+fn approved_template_status(info: &LoadedModelInfo) -> Result<TemplateMetadataStatus> {
+    match info.template_status {
+        TemplateStatus::Exact => Ok(TemplateMetadataStatus::Exact),
+        TemplateStatus::ReviewedEquivalent => Ok(TemplateMetadataStatus::ReviewedEquivalent),
+        TemplateStatus::OverrideUnverified => Ok(TemplateMetadataStatus::OverrideUnverified),
+        TemplateStatus::Mismatch | TemplateStatus::Missing => Err(BackendError::Metadata(
+            "unapproved template reached production readout".to_owned(),
+        )),
+    }
+}
+
+fn model_metadata(
+    spec: &RuntimeModelSpec,
+    info: &LoadedModelInfo,
+    template_status: TemplateMetadataStatus,
+    mode: ExecutionMode,
+) -> ModelMetadata {
+    let evidence = spec.template_equivalence.as_ref().and_then(|record| {
+        (template_status == TemplateMetadataStatus::ReviewedEquivalent).then(|| {
+            format!(
+                "{}; scope={}; artifact_sha256={}; gguf_template_sha256={}; native_profile_sha256={}",
+                record.evidence,
+                record.scope,
+                record.artifact_sha256,
+                record.gguf_template_sha256,
+                record.native_profile_sha256
+            )
+        })
+    });
+    ModelMetadata {
+        id: spec.id.clone(),
+        source: spec.source.clone(),
+        revision: spec.revision.clone(),
+        file: spec.file.clone(),
+        quant: spec.quant.clone(),
+        backend: info.backend.clone(),
+        artifact_sha256: info.artifact_sha256.clone(),
+        integrity: spec.integrity,
+        dtype: format!("GGUF quantized/mixed {}", spec.quant),
+        native_reference: spec
+            .native_reference
+            .as_ref()
+            .map(|reference| NativeReference {
+                source: reference.source.clone(),
+                revision: reference.revision.clone(),
+                dtype: reference.dtype.clone(),
+            }),
+        template_profile: spec.profile,
+        template_sha256: info.gguf_template_sha256.clone(),
+        template_override: spec.template_override,
+        template_status,
+        template_equivalence_evidence: evidence,
+        serving_config: Some(
+            match mode {
+                ExecutionMode::Shared => "llama-state-prefix-parallel-v1",
+                ExecutionMode::Batch => "llama-independent-batch-v1",
+                ExecutionMode::Direct => "llama-direct-v1",
+                ExecutionMode::Serial => "llama-serial-full-prompt-v1",
+            }
+            .to_owned(),
+        ),
+        adapter: None,
+        adapter_sha256: None,
+        adapter_revision: None,
+        torch_version: None,
+        transformers_version: None,
+    }
+}
+
+fn prefix_token_hash(tokens: &[u32]) -> String {
+    let mut serialized = String::from("[");
+    for (index, token) in tokens.iter().enumerate() {
+        if index > 0 {
+            serialized.push_str(", ");
+        }
+        write!(serialized, "{token}").expect("writing to String cannot fail");
+    }
+    serialized.push(']');
+    digest_hex(&Sha256::digest(serialized.as_bytes()))
+}
+
 fn direct_smoke(
     backend: &LlamaBackend,
     model: &LlamaModel,
@@ -1168,6 +2208,72 @@ mod tests {
         validate_final_chunk_local_index(513, 512, 0).unwrap();
         assert!(validate_final_chunk_local_index(513, 512, 512).is_err());
         assert!(validate_final_chunk_local_index(0, 512, 0).is_err());
+    }
+
+    #[test]
+    fn state_prefix_tokenization_drops_exactly_one_token() {
+        struct ByteTokenizer;
+        impl SlotTokenizer for ByteTokenizer {
+            fn tokenize_no_bos(&self, text: &str) -> openjev_core::types::Result<Vec<u32>> {
+                Ok(text
+                    .as_bytes()
+                    .iter()
+                    .map(|byte| u32::from(*byte))
+                    .collect())
+            }
+            fn token_piece(&self, token_id: u32) -> openjev_core::types::Result<Vec<u8>> {
+                Ok(vec![u8::try_from(token_id).unwrap()])
+            }
+            fn vocabulary_size(&self) -> usize {
+                256
+            }
+        }
+        let state = StateValue::parse_json(r#"{"z": 1, "a": [true]}"#).unwrap();
+        let text = state_prefix_text(&state, PromptProfile::Qwen3).unwrap();
+        let prefix = encode_state_prefix(&ByteTokenizer, &state, PromptProfile::Qwen3).unwrap();
+        assert_eq!(prefix.len() + 1, text.len());
+        assert_eq!(
+            prefix,
+            text.as_bytes()[..text.len() - 1]
+                .iter()
+                .map(|b| u32::from(*b))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn wave_planner_budgets_prefix_plus_sum_of_active_suffixes() {
+        let sequences = vec![vec![0; 4], vec![0; 5], vec![0; 6], vec![0; 2]];
+        let waves = plan_waves(10, &sequences, 20, 2).unwrap();
+        assert_eq!(waves, vec![vec![0, 1], vec![2, 3]]);
+        assert!(plan_waves(10, &[vec![0; 11]], 20, 2).is_err());
+        assert!(plan_waves(10, &[], 20, 2).is_err());
+        let one_per_wave = plan_waves(1, &sequences, 100, 1).unwrap();
+        assert_eq!(one_per_wave.len(), 4);
+    }
+
+    #[test]
+    fn ragged_scheduler_covers_empty_uneven_and_invalid_bounds() {
+        assert_eq!(ragged_step(&[], &[], 4).unwrap(), None);
+        assert_eq!(
+            ragged_step(&[0, 0], &[2, 5], 4).unwrap(),
+            Some((vec![0, 1], 2))
+        );
+        assert_eq!(
+            ragged_step(&[2, 2], &[2, 5], 4).unwrap(),
+            Some((vec![1], 3))
+        );
+        assert!(ragged_step(&[3], &[2], 4).is_err());
+        assert!(ragged_step(&[0, 0], &[1, 1], 1).is_err());
+        assert!(ragged_step(&[0], &[], 4).is_err());
+        assert!(ragged_step(&[0], &[1], 0).is_err());
+    }
+
+    #[test]
+    fn branch_reuse_requires_successful_full_sequence_clear() {
+        require_sequence_clear(1, true).unwrap();
+        let error = require_sequence_clear(1, false).unwrap_err();
+        assert!(error.to_string().contains("full clear returned false"));
     }
 
     #[test]

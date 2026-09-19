@@ -5,7 +5,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    types::{Decision, OpenJevError, Result},
+    types::{Decision, DecisionOption, OpenJevError, Result, StateValue},
     validate::{object_path, validate_integer_json},
 };
 
@@ -81,6 +81,47 @@ pub fn prepare_prompt(decision: &Decision, profile: PromptProfile) -> Result<Pre
         prompt_version: PROMPT_VERSION.to_owned(),
         profile,
     })
+}
+
+/// Reproduce Python `shared._state_prefix` up to the tokenizer boundary.
+///
+/// The returned text is the rendered two-message placeholder prompt through
+/// the serialized evidence object with its closing brace removed. Callers
+/// must tokenize it without BOS and drop exactly one final token.
+pub fn state_prefix_text(state: &StateValue, profile: PromptProfile) -> Result<String> {
+    let placeholder = Decision::new(
+        "prefix-only",
+        state.clone(),
+        "prefix boundary placeholder",
+        vec![
+            DecisionOption {
+                id: "yes".to_owned(),
+                description: "Yes".to_owned(),
+            },
+            DecisionOption {
+                id: "no".to_owned(),
+                description: "No".to_owned(),
+            },
+        ],
+    )?;
+    let payload = direct_payload(&placeholder)?;
+    let prompt = prepare_prompt(&placeholder, profile)?.text;
+    let mut occurrences = prompt.match_indices(&payload);
+    let first = occurrences.next().map(|(index, _)| index);
+    if first.is_none() || occurrences.next().is_some() {
+        return Err(OpenJevError::Template(
+            "cannot locate exactly one unmodified placeholder payload in the rendered prompt"
+                .to_owned(),
+        ));
+    }
+    let evidence = format!("{{\"evidence\": {}", python_json_dumps(state.as_value())?);
+    if !payload.starts_with(&evidence) {
+        return Err(OpenJevError::Template(
+            "evidence serialization changed before the shared prefix boundary".to_owned(),
+        ));
+    }
+    let index = first.expect("checked above");
+    Ok(format!("{}{}", &prompt[..index], evidence))
 }
 
 pub fn direct_payload(decision: &Decision) -> Result<String> {
@@ -241,6 +282,15 @@ mod tests {
         assert!(rendered.starts_with(r#""\u0000\u0001\u0002"#));
         assert!(rendered.contains(r#"\b\t\n"#));
         assert!(rendered.ends_with(r#"\u001e\u001f""#));
+    }
+
+    #[test]
+    fn shared_prefix_text_uses_ordered_evidence_and_placeholder_once() {
+        let state = StateValue::parse_json(r#"{"b": 2, "a": [true, null]}"#).unwrap();
+        let text = state_prefix_text(&state, PromptProfile::Qwen3).unwrap();
+        assert!(text.ends_with(r#"{"evidence": {"b": 2, "a": [true, null]}"#));
+        assert_eq!(text.matches("prefix boundary placeholder").count(), 0);
+        assert_eq!(text.matches("<|im_start|>user\n").count(), 1);
     }
 
     #[test]

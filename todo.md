@@ -16,7 +16,7 @@ resolved there; runtime gates remain unrun. Published llama crates are 0.1.156
 also corrects the brief's empty-option validation assumption, prediction-file
 cardinality (252; select authored144 by ID), build override assumptions, and
 chat-template API limitations. [`docs/PROGRESS.md`](docs/PROGRESS.md) records
-actual evidence. M1 and M2 are approved. M3 is committed and approved at HEAD `e5fb968`: strict authored144 plus perturbations108 prompt/token/slot gates pass, and production `score_direct` returns a full validated Readout. M4 is implemented locally; targeted cache/streaming/help remediation passes and awaits parent/Astra recheck before commit. It exposes production CLI/library execution without adding M5 shared/batch algorithms. **The full original brief below is preserved**, not rewritten as if later runtime validation had occurred.
+actual evidence. M1–M4 are approved and committed through HEAD `a44b805`; M3's strict authored144 plus perturbations108 prompt/token/slot gates pass, and production `score_direct` returns a full validated Readout. M5 is implemented locally without a commit: all twelve finalized CPU/Metal shared/batch probes fail the frozen gates, so no tested profile is enabled and production visibly falls back to serial full-prompt scoring. **The full original brief below is preserved**, not rewritten as if later runtime validation had occurred.
 
 ---
 
@@ -334,7 +334,7 @@ The sentence above records M2's boundary at its commit. M3 has since been implem
 
 Section 8 status after M3: architecture support, restricted templates, serialization, accelerator truth, and licensing decisions remain closed with runtime evidence. The safe-wrapper layer-count gap is explicitly nullable/statused rather than guessed. Shared/hybrid copy correctness is intentionally still an M5 runtime gate, not a hidden M3 question; CUDA remains build-instruction scope until its later device gate. There are no other unresolved M3 design questions.
 
-### M4 implementation status (targeted remediation complete; recheck pending)
+### M4 implementation status (reviewed, approved, and committed)
 
 - [x] Production `decide`, `noul`, `score`, `ask`, `run`, and `models list|pull|path` execution, with thin primitive adapters over owner-thread direct scoring.
 - [x] Exact text/file/stdin versus explicit structured-state ingestion; no trimming/guessing; explicit state never reads stdin; TTY absence errors.
@@ -345,7 +345,20 @@ Section 8 status after M3: architecture support, restricted templates, serializa
 - [x] JSON-only help/version/results/model-path/write-summary envelopes, clap-tree-derived nested help metadata, command schema export, stderr-only native/progress/error logs, clean broken-pipe behavior, process tests, deterministic test-only scoring injection, and opt-in cached Qwen native CLI tests.
 - [x] Parent/Astra code/evidence gate approved after targeted remediation; 97 workspace tests passed, native process capture 4/4. Ready for M4 milestone commit.
 
-M4 intentionally does not implement KV prefix copy, independent sequence packing, probe eligibility, eval/bench, calibration, temperature scaling, or permutation averaging. Those remain M5–M7.
+M4 intentionally does not implement KV prefix copy, independent sequence packing, probe eligibility, eval/bench, calibration, temperature scaling, or permutation averaging. Those remain M5–M7 at the M4 commit boundary.
+
+### M5 implementation status (reviewed and approved; all measured profiles disabled)
+
+- [x] Added immutable state-prefix prefill, full sequence copy into clean branches, ragged suffix scheduling with chunk-local output indices, checked branch clears and bounded wave reuse; no hybrid rollback or partial-prefix approximation.
+- [x] Added independent full-prompt packed batching with distinct sequence IDs, bounded waves and stable input ordering.
+- [x] Added exact configuration fingerprints and atomic process-contained probe receipts. Validation rejects malformed, failed, forged, reordered, incomplete, stale and nonmatching receipts; receipt data cannot relax the frozen `1e-3` logit / `1e-4` probability / identical-first-argmax gates.
+- [x] Added whole-group fresh-context serial fallback after receipt absence/failure or runtime group failure, visible requested/effective metadata and stderr warnings even under `--quiet`; `--require-shared` fails instead of falling back.
+- [x] Added model-free coverage for prefix construction, bounds, empty inputs, ragged scheduling, chunk-local indices, waves, copy/clear planning, receipt containment and forced child abort. Reprobe lifecycle tests now prove exact-key suspension before launch, durable fail-closed crash/malformed/nonzero/publication-failure transitions, parent-owned identity validation, and successful replacement. Native feature tests cover the compiled scheduler/receipt paths without claiming environment-gated model inference.
+- [x] Ran all twelve create-only finalized probes for three exact models × Metal/true CPU × shared/batch from the existing cache and target directories. Every configuration failed the frozen numerical gate with unchanged first argmax, so none is enabled. The 21-way, changed-state and repeated-cycle cases are explicitly unrun after decisive failure, not passed. Astra accepted this as the intended serial-only user fallback with no numerical blocker and no tolerance relaxation.
+- [x] Reran the cached Qwen release Metal native CLI process gate (5/5), including failed-receipt serial metadata, warning despite `--quiet`, `--require-shared`, and durable revocation after a probe-child crash with a synthetic pass confined to an isolated temporary cache. Reran the release Metal authored144 exact encoding gate (144/144).
+- [x] Final fmt/check, workspace/default clippy/tests, Metal and true-CPU feature clippy/tests, diff/reference checks, exact counts and commands are recorded in `docs/PROGRESS.md`; no M6/M7 implementation, reference edit, model download, new native target, or commit was made.
+
+No M5 shared/batch speedup is claimed. The large true-CPU shared deltas were inspected against direct/shared token, position, context, device and offload settings plus the pinned native source. No concrete implementation mismatch was found; decode-shape-dependent quantized kernels are a plausible but unproven explanation. Safe serial fallback is the reviewed supported outcome. Parent/Astra approved the lifecycle fix and 107-test workspace gate for the M5 commit; M6 must not claim shared speedup for these disabled configurations.
 
 ## 9. Later (v2+)
 

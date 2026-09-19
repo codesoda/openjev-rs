@@ -975,6 +975,52 @@ impl Readout {
         if self.readout != expected_readout {
             return validation("$.readout", "readout does not match the execution path");
         }
+        match self.execution.effective_mode {
+            ExecutionMode::Shared => {
+                if self
+                    .execution
+                    .probe_id
+                    .as_ref()
+                    .is_none_or(String::is_empty)
+                    || self.shared_timing.is_none()
+                    || self.prefix_tokens.is_none()
+                    || self.prefix_sha256.is_none()
+                    || self.cache_hit != Some(true)
+                    || self.forward_seconds.is_some()
+                    || self.total_seconds.is_some()
+                {
+                    return validation(
+                        "$",
+                        "shared execution requires a probe ID, real prefix reuse metadata, common timing, and no fabricated per-row timing",
+                    );
+                }
+            }
+            ExecutionMode::Batch => {
+                if self
+                    .execution
+                    .probe_id
+                    .as_ref()
+                    .is_none_or(String::is_empty)
+                    || self.shared_timing.is_some()
+                    || self.prefix_tokens.is_some()
+                    || self.prefix_sha256.is_some()
+                    || self.cache_hit != Some(false)
+                {
+                    return validation(
+                        "$",
+                        "batch execution requires a probe ID and cannot claim shared-prefix metadata",
+                    );
+                }
+            }
+            ExecutionMode::Direct | ExecutionMode::Serial => {
+                if self.execution.probe_id.is_some() || self.shared_timing.is_some() {
+                    return validation(
+                        "$",
+                        "direct/serial execution cannot claim probe-authorized shared timing",
+                    );
+                }
+            }
+        }
         let count = self.option_ids.len();
         if !(2..=16).contains(&count) {
             return validation("$.option_ids", "option count must be 2-16");

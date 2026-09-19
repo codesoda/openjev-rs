@@ -12,6 +12,7 @@ use thiserror::Error;
 
 pub mod cache;
 pub mod model;
+pub mod probe;
 pub mod registry;
 
 #[cfg(feature = "native")]
@@ -21,6 +22,12 @@ pub use cache::{CacheOptions, ModelCache, VerifiedArtifact, hash_file};
 #[cfg(feature = "native")]
 pub use model::resolve_model_spec;
 pub use model::{validate_hub_identity, validate_sha256};
+pub use probe::{
+    MAX_ABS_SLOT_LOGIT, MAX_PROBABILITY_DELTA, NATIVE_PIN, PROBE_SCHEMA, PROBE_SUITE_VERSION,
+    ProbeCaseResult, ProbeCaseStatus, ProbeConfiguration, ProbeEligibility, ProbeMode,
+    ProbePublication, ProbeReceipt, begin_probe_publication, load_passing_receipt, probe_id,
+    receipt_path, write_receipt,
+};
 pub use registry::{ModelEntry, ModelRegistry, NativeReferenceSpec, TemplateEquivalenceSpec};
 
 #[cfg(feature = "native")]
@@ -84,6 +91,16 @@ impl RuntimeModelSpec {
     #[must_use]
     pub const fn integrity(&self) -> Integrity {
         self.integrity
+    }
+
+    #[must_use]
+    pub const fn profile(&self) -> PromptProfile {
+        self.profile
+    }
+
+    #[must_use]
+    pub fn artifact_sha256(&self) -> &str {
+        &self.sha256
     }
 
     #[cfg(feature = "native")]

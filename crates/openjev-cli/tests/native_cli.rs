@@ -7,6 +7,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use openjev_core::{Device, GpuLayersRequested, PromptProfile};
+use openjev_llama::{
+    ModelCache, ModelRegistry, NATIVE_PIN, PROBE_SUITE_VERSION, ProbeCaseResult, ProbeCaseStatus,
+    ProbeConfiguration, ProbeMode, ProbeReceipt, load_passing_receipt, write_receipt,
+};
+
 const MODEL: &str = "qwen3-0.6b";
 const SHA256: &str = "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
 
@@ -47,6 +53,126 @@ fn assert_success(output: &Output) -> Vec<serde_json::Value> {
     assert!(parsed.iter().all(|row| row.is_object()));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("openjev-readout-v1"));
     parsed
+}
+
+#[test]
+fn probe_child_crash_durably_revokes_a_preexisting_synthetic_pass() {
+    if !enabled() {
+        return;
+    }
+
+    let registry = ModelRegistry::bundled().unwrap();
+    let user_cache = ModelCache::from_precedence(None).unwrap();
+    let model_argument = user_cache.model_path(registry.resolve(MODEL).unwrap());
+    let model_path =
+        fs::canonicalize(&model_argument).expect("the opt-in native gate requires cached Qwen");
+    let isolated_root =
+        std::env::temp_dir().join(format!("openjev-m5-probe-crash-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&isolated_root);
+    let isolated_cache = ModelCache::new(isolated_root.clone());
+    let device = if cfg!(all(target_os = "macos", feature = "metal")) {
+        Device::Metal
+    } else {
+        Device::Cpu
+    };
+    let configuration = ProbeConfiguration {
+        artifact_sha256: SHA256.to_owned(),
+        native_pin: NATIVE_PIN.to_owned(),
+        probe_suite_version: PROBE_SUITE_VERSION.to_owned(),
+        device,
+        gpu_layers_requested: if device == Device::Cpu {
+            GpuLayersRequested::Count(0)
+        } else {
+            GpuLayersRequested::All
+        },
+        offload_kqv: device != Device::Cpu,
+        op_offload: device != Device::Cpu,
+        threads: std::thread::available_parallelism()
+            .map(|value| u32::try_from(value.get()).unwrap())
+            .unwrap_or(1),
+        n_ctx: None,
+        max_tokens: 4096,
+        max_context_tokens: 32_768,
+        n_batch: 512,
+        n_ubatch: 512,
+        n_seq_max: 32,
+        kv_unified: true,
+        profile: PromptProfile::Qwen3,
+    };
+    let case_rows = [1, 2, 21, 2, configuration.n_seq_max + 1];
+    let case_ids = [
+        "binary-short-1-branch",
+        "three-way-ragged-2-branches-multichunk",
+        "sixteen-way-long-state-21-branches",
+        "changed-state-isolation",
+        "repeated-copy-clear-cycles",
+    ];
+    // State-machine fixture only in an isolated temporary cache. This synthetic
+    // pass is test data and is not native parity evidence or a user-cache receipt.
+    let receipt = ProbeReceipt::new(
+        model_path.display().to_string(),
+        ProbeMode::Shared,
+        configuration.clone(),
+        case_ids
+            .into_iter()
+            .zip(case_rows)
+            .map(|(id, rows)| ProbeCaseResult {
+                id: id.to_owned(),
+                status: ProbeCaseStatus::Passed,
+                rows,
+                max_abs_slot_logit: Some(0.0),
+                max_probability_delta: Some(0.0),
+                same_first_argmax: Some(true),
+                detail: None,
+            })
+            .collect(),
+        None,
+    )
+    .unwrap();
+    write_receipt(&isolated_cache, &receipt).unwrap();
+    load_passing_receipt(
+        &isolated_cache,
+        &model_path.display().to_string(),
+        ProbeMode::Shared,
+        &configuration,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_openjev"))
+        .args([
+            "--offline",
+            "--cache-dir",
+            isolated_root.to_str().unwrap(),
+            "--model-sha256",
+            SHA256,
+            "--template-profile",
+            "qwen3",
+            "models",
+            "probe",
+            model_argument.to_str().unwrap(),
+            "--mode",
+            "shared",
+        ])
+        .env("OPENJEV_INTERNAL_PROBE_CRASH", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["schema"], "openjev-probe-report-v1");
+    assert_eq!(report["enabled"], false);
+    assert!(report["receipt"].is_null());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("panicked"));
+    assert!(
+        load_passing_receipt(
+            &isolated_cache,
+            &model_path.display().to_string(),
+            ProbeMode::Shared,
+            &configuration,
+        )
+        .is_err(),
+        "a crashed reprobe must leave the preexisting pass ineligible"
+    );
+    fs::remove_dir_all(isolated_root).unwrap();
 }
 
 #[test]
@@ -120,7 +246,7 @@ fn cached_qwen_exercises_m4_native_cli_surfaces_and_json_streams() {
     assert_eq!(run[0]["id"], "run-1");
     assert_eq!(run[1]["id"], "run-2");
 
-    let multi = assert_success(&invoke(
+    let multi_output = invoke(
         &[
             "--quiet",
             "decide",
@@ -136,7 +262,13 @@ fn cached_qwen_exercises_m4_native_cli_surfaces_and_json_streams() {
             "B",
         ],
         None,
-    ));
+    );
+    assert!(
+        String::from_utf8_lossy(&multi_output.stderr)
+            .contains("using fresh serial full-prompt fallback"),
+        "quiet must not suppress a semantic-path warning: {multi_output:?}"
+    );
+    let multi = assert_success(&multi_output);
     assert_eq!(multi.len(), 2);
     for row in multi {
         assert_eq!(row["execution"]["requested_mode"], "shared");
@@ -145,9 +277,34 @@ fn cached_qwen_exercises_m4_native_cli_surfaces_and_json_streams() {
             row["execution"]["fallback_reason"]
                 .as_str()
                 .unwrap()
-                .contains("M5")
+                .contains("probe")
         );
+        assert!(row["execution"]["probe_id"].is_null());
+        assert!(row.get("shared_timing").is_none());
+        assert_eq!(row["cache_hit"], false);
     }
+
+    let required = invoke(
+        &[
+            "--require-shared",
+            "decide",
+            "--state",
+            "state",
+            "--question",
+            "Q1",
+            "--question",
+            "Q2",
+            "--option",
+            "A",
+            "--option",
+            "B",
+        ],
+        None,
+    );
+    assert_eq!(required.status.code(), Some(2), "{required:?}");
+    assert!(required.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&required.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "unsupported");
 }
 
 #[test]

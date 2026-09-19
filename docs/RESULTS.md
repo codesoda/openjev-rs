@@ -129,7 +129,7 @@ The report also records hashes/sizes for authored144, perturbations108, and the 
 
 ## M4 — production CLI and serial fallback
 
-Status: **implemented locally; initial evidence plus targeted Astra-remediation gates pass, pending parent/Astra targeted recheck before commit.** M5 KV copy and independent sequence packing remain absent.
+Status at the M4 boundary: **approved and committed as `a44b805` after targeted Astra-remediation gates passed.** The evidence below describes the M4 boundary, before M5 added receipt-gated KV copy and independent sequence packing.
 
 The release Metal CLI was built in the existing `target-m2-metal` directory and exercised only the already verified cached Qwen3-0.6B artifact with `--offline`. Seven create-only probe cases covered direct `decide` with confidence, stdin Noul, structured-state Score with explicit finite values, stdin `ask`, ordered two-row `run`, repeated-question automatic shared request with serial fallback, and `--require-shared` refusal. Every success stdout line parsed as exactly one JSON object; native llama logs stayed on stderr. Direct/serial-full-prompt rows reported the production readout string and `cache_hit=false`.
 
@@ -160,3 +160,83 @@ Retained create-only evidence:
 The corresponding earlier M4 files are immutable passing captures retained for chronology. The `final3` test capture supersedes but does not overwrite `final2` after custom Hub mutation containment, true streaming run output, and clap-tree help metadata remediation; the earlier probe/model captures remain the latest probe evidence.
 
 No GGUF was downloaded or copied, no new native target directory was created, and no all-model or long true-CPU inference smoke was rerun. The existing `target-m2-metal` and `target-m2-cpu` directories were reused for feature clippy/tests; actual new M4 inference was Qwen/Metal only. Eval, bench, calibration, permutation/temperature transforms, shared KV copy, probe eligibility, and packed batch timing remain explicitly unimplemented.
+
+## M5 — shared/batch eligibility probes
+
+Status: **the real shared-KV and independent packed-batch paths are implemented, but all twelve exact configurations probed on this host failed the frozen numerical gates. No tested profile is enabled; standard scoring visibly uses fresh serial full prompts.** This is a fail-closed result, not a shared/batch performance claim.
+
+The exact configuration key includes artifact SHA-256, `llama-cpp-2/llama.cpp` pin, probe-suite version, device, GPU-layer request, KQV/op-offload booleans, thread count, explicit/automatic context settings, `n_batch`, `n_ubatch`, `n_seq_max`, unified KV and prompt profile. The retained runs used the same host and native pins documented for M2, default 11 threads, automatic context bounded by 4,096 request tokens and 32,768 context tokens, 512 batch/ubatch, and 32 sequences. Metal requested all layers with KQV/op offload; true CPU requested zero layers and disabled both offloads.
+
+Frozen acceptance requires all of:
+
+- maximum absolute selected-slot logit delta `<= 0.001`;
+- maximum probability delta `<= 0.0001`;
+- identical first argmax.
+
+Each subprocess began with a one-branch binary case, then a ragged two-branch 3-way case that forces multiple chunks (`n_batch=512`). Later planned cases are a long-state 21-branch 16-way case, changed-state isolation, and a `n_seq_max + 1` copy/clear case that forces sequence-ID reuse across waves. After a decisive failure, later cases are explicitly recorded `unrun-after-decisive-failure`; they are not silently marked passed. Failed receipts are retained locally and reject production eligibility.
+
+| Model | Device | Mode | max slot-logit delta | max probability delta | same first argmax | Decisive case |
+|---|---|---|---:|---:|---|---|
+| Qwen3-0.6B | Metal | shared | 0.03468895 | 0.00002451 | yes | ragged 2-branch |
+| Qwen3-0.6B | Metal | batch | 0.05129051 | 0.00007275 | yes | ragged 2-branch |
+| MiniCPM5-2B | Metal | shared | 0.01604462 | 0.00046002 | yes | ragged 2-branch |
+| MiniCPM5-2B | Metal | batch | 0.02395439 | 0.00065809 | yes | ragged 2-branch |
+| Qwen3.5-4B | Metal | shared | 0.00438118 | 0.00007469 | yes | ragged 2-branch |
+| Qwen3.5-4B | Metal | batch | 0.00293541 | 0.00051441 | yes | ragged 2-branch |
+| Qwen3-0.6B | CPU | shared | 0.81830978 | 0.17236975 | yes | binary 1-branch |
+| Qwen3-0.6B | CPU | batch | 0.84081841 | 0.00125196 | yes | ragged 2-branch |
+| MiniCPM5-2B | CPU | shared | 0.59481430 | 0.17811387 | yes | binary 1-branch |
+| MiniCPM5-2B | CPU | batch | 0.34326744 | 0.03522472 | yes | ragged 2-branch |
+| Qwen3.5-4B | CPU | shared | 0.10205460 | 0.01284628 | yes | binary 1-branch |
+| Qwen3.5-4B | CPU | batch | 0.49478531 | 0.03544527 | yes | ragged 2-branch |
+
+The exact JSON reports are under [`results/m5/`](results/m5/). The twelve finalized `*-final.json` reports include `probe_suite_version` in the configuration identity; each has `process_status=completed`, `enabled=false`, a self-consistent failed receipt, observed deltas, explicit case statuses, and a failure reason. They total 34,284 bytes. The twelve earlier same-outcome files without `-final` are preserved as pre-final evidence, but their configuration payload omitted the suite-version identity and they are not valid eligibility receipts under the finalized implementation. Finalized SHA-256 values:
+
+| Report | Bytes | SHA-256 |
+|---|---:|---|
+| `qwen3-0.6b-metal-shared-final.json` | 2,830 | `f66138122a5d4bdc938df8fe6ed643e6ee5620aa27c510405f838b14e952d06b` |
+| `qwen3-0.6b-metal-batch-final.json` | 2,821 | `452a97ce9288fe484134e9fbad162e4f0a20f0b5729c4bc9f670f169a810c8f6` |
+| `minicpm5-2b-metal-shared-final.json` | 2,818 | `761806695773e358f3ed9b2be0cee17c647a1fdb4934fd1a87f62817c42f36af` |
+| `minicpm5-2b-metal-batch-final.json` | 2,825 | `5816b275b8aadcf594560f870f2622f3bd05f8300170ffe5695a716a2ef3683d` |
+| `qwen3.5-4b-metal-shared-final.json` | 2,840 | `446c89092061be2d694cc02f950b5020c05ae12e6c6e1e442e944bfdd680b941` |
+| `qwen3.5-4b-metal-batch-final.json` | 2,831 | `6296c670b4e071e25b85ff7c396fcf0442846032d081c9bd7cdb1e0f8e31b4bc` |
+| `qwen3-0.6b-cpu-shared-final.json` | 2,970 | `4019132169fa877b82359d733633540eea0d20c8eb04327ce519231735e5bbec` |
+| `qwen3-0.6b-cpu-batch-final.json` | 2,801 | `c7468de7c67a90ec03e66d88cb2745ab46a2957165e896b2995ea0bb8d7dedb7` |
+| `minicpm5-2b-cpu-shared-final.json` | 2,974 | `3673497147cc3b6de0ef88434807f5765358a0e15404b46a60fb16b70aa5b0a4` |
+| `minicpm5-2b-cpu-batch-final.json` | 2,797 | `f962d1aba4ec62f53f5c91929c56b2f73a5897eda23ffa11d61fef5450bc6d7f` |
+| `qwen3.5-4b-cpu-shared-final.json` | 2,990 | `5499f261269dcba9d99ecb8981c63b81e408e89e0486ca8ef825224e31476687` |
+| `qwen3.5-4b-cpu-batch-final.json` | 2,787 | `04234d7eaac0a836eddebca9f2f8d6c595be9c8149f1fef4fc57816becaf2c63` |
+
+The first shared failure on true CPU is large, but code and pinned-source inspection found no concrete token, position, device, offload, context-size, or readout-index mismatch: full prompts and shared suffixes use the same token IDs and absolute positions, CPU disables KQV/op offload on both paths, and every final row uses its batch-local output offset. The execution shapes do differ by design: direct uses one sequence and usually one prompt-processing decode; shared separates prefix and suffix decodes after full sequence copy; ragged shared/batch decodes multiple sequences together. The pinned llama.cpp source builds graphs from microbatch token/sequence shape and dispatches prompt versus token-generation work differently. Different quantized CPU GEMM/GEMV or reduction paths are therefore a plausible explanation, but are not proven as the cause. No tolerance was relaxed and no targeted profile was enabled.
+
+Only the one-branch binary case and, where reached, the ragged two-branch case were executed. The 21-branch 16-way, changed-state-isolation, and repeated copy/clear-cycle cases are `unrun-after-decisive-failure` in every finalized receipt; they are not passed coverage. Because no exact configuration is eligible, M5 establishes safe serial fallback only. It provides no verified shared/batch speedup and no performance ratio is claimed.
+
+Reproduction uses only the existing cache and target directories and runs one model at a time:
+
+```sh
+# Build once in the existing Metal target, then probe each model/mode.
+CARGO_NET_OFFLINE=true GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal \
+  cargo build --release -p openjev-cli --features metal,integration
+for model in qwen3-0.6b minicpm5-2b qwen3.5-4b; do
+  for mode in shared batch; do
+    OPENJEV_INTEGRATION=1 target-m2-metal/release/openjev \
+      --offline --device metal models probe "$model" --mode "$mode"
+  done
+done
+
+# True CPU, with Metal absent from the native build and runtime offload disabled.
+CARGO_NET_OFFLINE=true GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu \
+  cargo build --release -p openjev-cli --features native,integration
+for model in qwen3-0.6b minicpm5-2b qwen3.5-4b; do
+  for mode in shared batch; do
+    OPENJEV_INTEGRATION=1 target-m2-cpu/release/openjev \
+      --offline --device cpu --gpu-layers 0 models probe "$model" --mode "$mode"
+  done
+done
+```
+
+A probe report exits 0 only when enabled and exits 1 on a completed numerical failure. Native/progress output remains on stderr. The reports are stdout JSON only; large repetitive native stderr was not committed.
+
+Astra accepted the twelve numerical failures as the intended serial-only outcome: they are not a blocker and the frozen gates were not relaxed. The later lifecycle review found that the original forced-abort regression checked only the disabled report: a preexisting passing receipt for the same key could remain eligible after the crash. Reprobe now publishes an exact-key suspension in the parent before child launch and holds a process lock through publication. Crash, malformed/nonzero child output, launch error, identity mismatch, and publication failure leave the key suspended; only a normal fully validated exact passing child result clears suspension after atomic receipt publication. Failed diagnostic receipts remain ineligible. An updated isolated-temporary-cache process regression seeds a clearly labelled synthetic state-machine pass (not parity evidence and never a user-cache receipt), forces the cached-Qwen child abort before model load, and proves the old pass can no longer be loaded afterward. Model-free tests cover successful, failed, malformed/nonpublished, nonzero-after-passing, parent-identity mismatch, and publication-failure transitions.
+
+No finalized numerical report was rerun or overwritten, no GGUF was downloaded or copied, no new native target directory was created, and `reference/` was unchanged.

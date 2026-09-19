@@ -12,7 +12,8 @@ pub use eval::{EvalReport, EvalSummary, GoldRow, Prediction, ProbabilityInput, e
 pub use numerics::{NumericReadout, first_argmax, normalized_margin, read_logits, softmax};
 pub use primitives::{Noul, Score, ScoreLevel};
 pub use prompt::{
-    DIRECT_SYSTEM, PROMPT_VERSION, PreparedPrompt, PromptProfile, prepare_prompt, python_json_dumps,
+    DIRECT_SYSTEM, PROMPT_VERSION, PreparedPrompt, PromptProfile, prepare_prompt,
+    python_json_dumps, state_prefix_text,
 };
 pub use slots::{LETTERS, SlotTokenizer, VerifiedSlots, verify_slots};
 pub use types::{

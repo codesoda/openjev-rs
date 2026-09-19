@@ -23,22 +23,29 @@ and passed the strict cached Qwen3 authored144 plus perturbations108 prompt,
 token and slot gates.
 
 M4 exposes that production path through `openjev decide`, `noul`, `score`,
-`ask`, `run`, and `models list|pull|path`. Input is fully validated before model
-load; stdout is JSON/JSONL only; native/progress/warning/error logs use stderr;
-file output is create-only. `run` writes and flushes each success or ErrorRecord
-before scoring the next row instead of retaining the run in memory. Noul and
-Score are transparent direct-Choice adapters, and opt-in confidence is the
-labelled uncalibrated normalized margin.
-A backend-disabled build parses and validates inputs but returns structured
-`backend_unavailable` rather than fake probabilities.
+`ask`, `run`, and `models list|pull|path`. M5 adds exact shared-prefix KV copy,
+independent packed batching, configuration-bound subprocess probes and local
+eligibility receipts. Input is fully validated before model load; stdout is
+JSON/JSONL only; native/progress/warning/error logs use stderr; file output is
+create-only. `run` writes and flushes each success or ErrorRecord before scoring
+the next row instead of retaining the run in memory. Noul and Score are
+transparent direct-Choice adapters, and opt-in confidence is the labelled
+uncalibrated normalized margin. A backend-disabled build parses and validates
+inputs but returns structured `backend_unavailable` rather than fake
+probabilities.
 
-Shared KV copy and independent packed batching remain M5 work. Repeated
-`decide --question` and explicit `run --mode shared|batch` therefore report
-`requested_mode=shared|batch`, `effective_mode=serial`, a nonempty M5 fallback
-reason, and an stderr warning even with `--quiet`. `--require-shared` fails.
-The serial fallback scores complete prompts and reports `cache_hit=false`; it
-never claims prefix reuse. Eval/bench remain explicit M6 not-implemented
-surfaces, and calibration/permutation/nondefault temperature remain M7.
+Native shared/batch execution is never enabled merely because it compiled. A
+passing local receipt for the exact artifact, native pin, probe-suite version,
+device/offload, threads, context/batch/sequence settings and prompt profile is
+required. The
+retained Metal and true-CPU probes for all three pinned profiles failed the
+frozen numerical gates, so those twelve tested configurations intentionally
+remain on fresh serial full-prompt scoring. Requested/effective mode, the
+nonempty receipt failure, and `cache_hit=false` make that fallback visible;
+stderr warns even with `--quiet`. `--require-shared` fails before inference when
+no matching passing receipt exists. Eval/bench remain explicit M6
+not-implemented surfaces, and calibration/permutation/nondefault temperature
+remain M7.
 
 MiniCPM5/Qwen3.5 have exact template hashes. Qwen3's GGUF and native templates
 are nonidentical; parent/Astra approved a manifest-keyed `reviewed-equivalent`
@@ -70,7 +77,7 @@ See `docs/PLAN.md` for the reviewed milestone contract,
 normative emitted-readout schema, and `schemas/commands-v1.schema.json` for M4
 command envelopes.
 
-## Build and install the M4 CLI
+## Build and install the M5 CLI
 
 The ordinary workspace build deliberately excludes llama.cpp:
 
@@ -172,6 +179,25 @@ OPENJEV_INTEGRATION=1 GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu \
   cargo run -p openjev-llama --features native --example m2_smoke -- \
   --all --offline --device cpu --gpu-layers 0
 ```
+
+M5 probes run in a subprocess. Before launch, the parent establishes and locks
+the exact receipt key and suspends any prior authorization. A crash, malformed
+or nonzero passing report, or publication failure leaves that key suspended;
+only a fully validated exact passing child result replaces eligibility. Failed
+receipts may remain as diagnostics but are not eligible. Probe both modes
+independently because eligibility is mode-specific:
+
+```sh
+openjev --offline --device metal models probe qwen3-0.6b --mode shared
+openjev --offline --device metal models probe qwen3-0.6b --mode batch
+```
+
+A failed probe exits 1 with an `openjev-probe-report-v1` JSON object on stdout;
+a passing probe exits 0. Standard scoring never silently reprobes or relaxes
+the frozen `1e-3` slot-logit / `1e-4` probability / identical-first-argmax
+gates. See `docs/RESULTS.md` and `docs/results/m5/` for the twelve finalized
+`*-final.json` reports, preserved pre-final captures, and exact reproduction
+commands.
 
 Integration runs are explicit and may download only when `--offline` is absent.
 Ordinary `cargo test --workspace` never downloads a model. The canonical cache
