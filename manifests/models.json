@@ -1,0 +1,67 @@
+{
+  "schema": "openjev-model-registry-v1",
+  "default_model": "minicpm5-2b",
+  "models": [
+    {
+      "id": "qwen3-0.6b",
+      "repo": "Qwen/Qwen3-0.6B-GGUF",
+      "revision": "23749fefcc72300e3a2ad315e1317431b06b590a",
+      "file": "Qwen3-0.6B-Q8_0.gguf",
+      "bytes": 639446688,
+      "sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+      "quant": "Q8_0",
+      "profile": "qwen3",
+      "native_reference": {
+        "source": "Qwen/Qwen3-0.6B",
+        "revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+        "dtype": "bfloat16",
+        "tokenizer_artifact": "tokenizer_config.json",
+        "tokenizer_sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+        "template_sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8"
+      },
+      "template_equivalence": {
+        "artifact_sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+        "gguf_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
+        "native_profile_sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+        "scope": "two string messages (system then user), no tools, add_generation_prompt=true, enable_thinking=false",
+        "evidence": "fixtures/qwen-template-equivalence.json"
+      }
+    },
+    {
+      "id": "minicpm5-2b",
+      "repo": "openbmb/MiniCPM5-2B-GGUF",
+      "revision": "2079a22f3beaa4e306449978533478fe0522f4b3",
+      "file": "MiniCPM5-2B-Q4_K_M.gguf",
+      "bytes": 1561318368,
+      "sha256": "ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd",
+      "quant": "Q4_K_M",
+      "profile": "minicpm5",
+      "native_reference": {
+        "source": "openbmb/MiniCPM5-2B",
+        "revision": "12a3808a956f869c767195e9266b59c4d21d92e2",
+        "dtype": "bfloat16",
+        "tokenizer_artifact": "tokenizer_config.json",
+        "tokenizer_sha256": "e9b1064649e771d7a8e15637c68b2d2749724877ba3648bd74a4ece31c26303b",
+        "template_sha256": "cc945752db555d60949b16989df4ccfeb52a313d6b4b5c5229dd786e2e9fcf1c"
+      }
+    },
+    {
+      "id": "qwen3.5-4b",
+      "repo": "bartowski/Qwen_Qwen3.5-4B-GGUF",
+      "revision": "4168f45a16a1290d65a4ec0fa312ae917a4c15d6",
+      "file": "Qwen_Qwen3.5-4B-Q4_K_M.gguf",
+      "bytes": 3013027808,
+      "sha256": "13c16f426047e2de38cd075bdade4a7bcbc8c774384876f677740cda65f8a983",
+      "quant": "Q4_K_M",
+      "profile": "qwen3.5",
+      "native_reference": {
+        "source": "Qwen/Qwen3.5-4B",
+        "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+        "dtype": "bfloat16",
+        "tokenizer_artifact": "tokenizer_config.json",
+        "tokenizer_sha256": "316230d6a809701f4db5ea8f8fc862bc3a6f3229c937c174e674ff3ca0a64ac8",
+        "template_sha256": "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715"
+      }
+    }
+  ]
+}

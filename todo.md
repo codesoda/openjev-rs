@@ -17,8 +17,7 @@ also corrects the brief's empty-option validation assumption, prediction-file
 cardinality (252; select authored144 by ID), build override assumptions, and
 chat-template API limitations. [`docs/PROGRESS.md`](docs/PROGRESS.md) records
 actual evidence. M1 is implemented, independently gated, and approved by
-parent/Astra after fixing separate-review findings; M2 is next. **The full original brief
-below is preserved**, not rewritten as if later runtime validation had occurred.
+parent/Astra after fixing separate-review findings. M2 and its targeted cache remediation are implemented; all three exact GGUFs loaded/scored on Metal and true CPU. Parent/Astra adjudicated Qwen3's nonidentical templates as equivalent only for the restricted disabled-thinking profile; final parent/Astra targeted code/evidence verification passed with 76 workspace tests; M2 is approved for commit. **The full original brief below is preserved**, not rewritten as if later runtime validation had occurred.
 
 ---
 
@@ -292,7 +291,7 @@ order-preserving parser; library-built Values remain recursively revalidated.
 Finite-output serializers are explicit so nonfinite readout data errors rather
 than becoming JSON `null`.
 The optional native dependency graph is present in `Cargo.lock` but absent from
-default compilation; native/backend behavior remains deliberately unimplemented
+default compilation; native/backend behavior remained deliberately unimplemented
 until M2.
 
 The first Astra M1 gate reproduced five blockers: unbounded recursive raw JSON,
@@ -304,6 +303,22 @@ without admitting floating negative zero. All findings have cross-route
 regressions described in `docs/PROGRESS.md`. Subsequent ingestion-route and
 reserved-key regressions were also fixed; final parent/Astra review approved M1
 with 54 workspace tests passing. The fixes do not enter M2/M7 algorithm scope.
+
+### M2 implementation status (reviewed and approved)
+
+- [x] Added `manifests/models.json` with the three full GGUF/native commits, filenames, exact sizes/SHA-256 values, quant/profile, tokenizer hash, and pinned native template hash.
+- [x] Added canonical cache root precedence, hf-hub 1.0 blocking downloads at exact commits, process-safe per-artifact locking, download reuse, verified atomic receipts, full size/SHA checks at cache resolution and every worker load, offline cache-only behavior, and explicit corruption/repair policy.
+- [x] Added one-owner-thread native loading and a direct smoke helper with scoped borrowing contexts, no workspace unsafe, `AddBos::Never`, nondeprecated byte-piece decoding, complete slot/boundary checks, chunk-local logits indexing, immediate raw-logit copy, and f64 core readout.
+- [x] Built separate Metal (`GGML_METAL=ON`, all layers) and true CPU (`GGML_METAL=OFF`, zero layers and offload flags disabled) targets; inspected their real CMake caches and runtime device/native logs.
+- [x] Observed each exact artifact transfer into `~/.cache/openjev`, then loaded/warmed/scored all three one at a time on Metal and offline CPU. Retained offline captures prove verified reuse; they are not independent transport-count evidence. All six readouts were finite. Evidence is under `docs/results/` and summarized in `docs/RESULTS.md`.
+- [x] Fixed targeted cache review findings: portable safe repo/file validation before filesystem work; owned symlink containment; canonical regular-file import from HF relative snapshots; dangling destination handling; explicit owned-byte quarantine and snapshot rebuild; corrupt external bypass without modification; offline-repair miss behavior; failed-repair receipt invalidation; atomic Unix receipt replacement; and a true two-process one-fetch regression using tiny files only.
+- [x] Adjudicated Qwen3-0.6B's nonidentical GGUF `57f1fd00…d0361` and native `a55ee1b1…74d8` templates as `reviewed-equivalent` only for two string system/user messages, no tools, generation prompt enabled, and thinking disabled. The manifest record is also keyed to artifact `9465e63a…031`; unseen hashes fail. Credited fixture templates, integrity tests, and the Jinja 3.1.4 oracle record 144 + 108 rows, all 252 reference prompt hashes, and four edge states without claiming broader equivalence.
+- [x] Added create-only remediation captures for all three models on offline Metal and true CPU. All six rows pass with verified cache hits; original mismatch captures remain unchanged. `gpu_layers_actual=null` remains the honest safe-wrapper limitation.
+- [x] Parent/Astra independently verified targeted fixes, all six passing smoke captures, and final gates (76 workspace tests) before the M2 commit.
+
+Section 8 outcomes: architecture loading succeeded for all three (`qwen3`, `llama`, `qwen35`) on the pinned 0.1.156 source, so no unsupported `LLAMA_CPP_PATH`, dynamic-link, fork, mistralrs, or model-removal workaround was attempted. MiniCPM5 and Qwen3.5 are exact-template matches; Qwen3 is narrowly reviewed-equivalent, not exact. CPU/Metal flags and observed runtime evidence are recorded rather than inferred. Hybrid shared correctness remains M5 and no shared/batch/permutation implementation was added in M2.
+
+M3's exhaustive authored144 parity and mandatory exact Qwen prompt-hash/token gate remain next and were not run or claimed. M2 is approved for its milestone commit after parent/Astra code/evidence review.
 
 ## 9. Later (v2+)
 

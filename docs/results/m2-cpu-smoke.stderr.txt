@@ -1,0 +1,23 @@
+Command: OPENJEV_INTEGRATION=1 GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu RUST_LOG=info cargo run -p openjev-llama --features native --example m2_smoke -- --all --offline --device cpu --gpu-layers 0
+Exit: 1 (the Qwen3 template mismatch is a deliberate non-pass; the runner continued through both remaining models)
+Full native stderr intentionally reduced; SHA-256 and line/byte count of the raw capture (not retained) follow.
+eaa545a7f4987f771a1dc791ba4010e4643e10c3fe291e717c354447b584a9e5  /tmp/openjev-m2-cpu.stderr
+     613   84248 /tmp/openjev-m2-cpu.stderr
+--- selected stderr ---
+2026-09-19T07:21:34.340952Z  INFO m2_smoke::native: using canonical openjev cache cache_root=/Users/chrisraethke/.cache/openjev
+2026-09-19T07:21:34.341361Z  INFO m2_smoke::native: resolving pinned artifact model=qwen3-0.6b repo=Qwen/Qwen3-0.6B-GGUF revision=23749fefcc72300e3a2ad315e1317431b06b590a file=Qwen3-0.6B-Q8_0.gguf
+2026-09-19T07:21:47.638904Z  INFO m2_smoke::native: verified artifact SHA-256 and size model=qwen3-0.6b path=/Users/chrisraethke/.cache/openjev/hub/models--Qwen--Qwen3-0.6B-GGUF/snapshots/23749fefcc72300e3a2ad315e1317431b06b590a/Qwen3-0.6B-Q8_0.gguf cache_hit=true
+2026-09-19T07:22:00.609242Z  INFO load_from_file: llama-cpp-2: - kv   0:                       general.architecture str              = qwen3 module="llama.cpp::llama_model_loader"
+2026-09-19T07:22:00.657935Z  INFO load_from_file: llama-cpp-2: - kv  25:                    tokenizer.chat_template str              = {%- if tools %}\n    {{- '<|im_start|>... module="llama.cpp::llama_model_loader"
+2026-09-19T07:22:01.599428Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3-0.6b architecture=qwen3 n_ctx_train=40960 template_sha256=Some("57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361") template_status=Mismatch load_seconds=1.029307208
+2026-09-19T07:22:30.010603Z  INFO m2_smoke::native: resolving pinned artifact model=minicpm5-2b repo=openbmb/MiniCPM5-2B-GGUF revision=2079a22f3beaa4e306449978533478fe0522f4b3 file=MiniCPM5-2B-Q4_K_M.gguf
+2026-09-19T07:23:01.496084Z  INFO m2_smoke::native: verified artifact SHA-256 and size model=minicpm5-2b path=/Users/chrisraethke/.cache/openjev/hub/models--openbmb--MiniCPM5-2B-GGUF/snapshots/2079a22f3beaa4e306449978533478fe0522f4b3/MiniCPM5-2B-Q4_K_M.gguf cache_hit=true
+2026-09-19T07:23:33.389897Z  INFO load_from_file: llama-cpp-2: - kv   0:                       general.architecture str              = llama module="llama.cpp::llama_model_loader"
+2026-09-19T07:23:33.426794Z  INFO load_from_file: llama-cpp-2: - kv  33:                    tokenizer.chat_template str              = {{- bos_token }}{%- if tools %}\n    {... module="llama.cpp::llama_model_loader"
+2026-09-19T07:23:35.291950Z  INFO openjev_llama::engine: loaded pinned GGUF model=minicpm5-2b architecture=llama n_ctx_train=131072 template_sha256=Some("cc945752db555d60949b16989df4ccfeb52a313d6b4b5c5229dd786e2e9fcf1c") template_status=Match load_seconds=1.931653708
+2026-09-19T07:24:17.084978Z  INFO m2_smoke::native: resolving pinned artifact model=qwen3.5-4b repo=bartowski/Qwen_Qwen3.5-4B-GGUF revision=4168f45a16a1290d65a4ec0fa312ae917a4c15d6 file=Qwen_Qwen3.5-4B-Q4_K_M.gguf
+2026-09-19T07:25:17.436344Z  INFO m2_smoke::native: verified artifact SHA-256 and size model=qwen3.5-4b path=/Users/chrisraethke/.cache/openjev/hub/models--bartowski--Qwen_Qwen3.5-4B-GGUF/snapshots/4168f45a16a1290d65a4ec0fa312ae917a4c15d6/Qwen_Qwen3.5-4B-Q4_K_M.gguf cache_hit=true
+2026-09-19T07:26:12.482746Z  INFO load_from_file: llama-cpp-2: - kv   0:                       general.architecture str              = qwen35 module="llama.cpp::llama_model_loader"
+2026-09-19T07:26:12.574318Z  INFO load_from_file: llama-cpp-2: - kv  39:                    tokenizer.chat_template str              = {%- set image_count = namespace(value... module="llama.cpp::llama_model_loader"
+2026-09-19T07:26:16.980947Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3.5-4b architecture=qwen35 n_ctx_train=262144 template_sha256=Some("a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715") template_status=Match load_seconds=4.566684292
+Note: runtime_devices in the JSON rows contains CPU only. llama.cpp also emitted the same 15 Qwen3.5 unused block-32 MTP/next-token tensor warnings as the Metal run; the structured smoke remained finite and passed M2's direct-readout gate.

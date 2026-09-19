@@ -1,0 +1,34 @@
+{
+  "schema": "openjev-qwen-template-equivalence-v1",
+  "artifact_sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+  "gguf_template": {
+    "path": "fixtures/templates/qwen3-gguf-57f1fd00.jinja",
+    "bytes": 4100,
+    "sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361"
+  },
+  "native_template": {
+    "path": "fixtures/templates/qwen3-native-a55ee1b1.jinja",
+    "bytes": 4168,
+    "sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8"
+  },
+  "profile": {
+    "messages": "exactly two string messages: system then user",
+    "tools": false,
+    "add_generation_prompt": true,
+    "enable_thinking": false
+  },
+  "jinja_version": "3.1.4",
+  "authored_rows": 144,
+  "perturbation_rows": 108,
+  "reference_prompt_hashes_matched": 252,
+  "edge_states": 4,
+  "edge_state_kinds": [
+    "tool-response-looking string",
+    "think-tag-looking string",
+    "unicode and quotes",
+    "structured insertion-ordered state"
+  ],
+  "adjudication": "reviewed-equivalent",
+  "limitations": "The source templates are not identical. This record does not approve tools, multimodal content, assistant reasoning, or arbitrary multi-turn conversations.",
+  "reproduce": "python3 scripts/verify_qwen_template_equivalence.py"
+}

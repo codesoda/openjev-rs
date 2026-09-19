@@ -1,0 +1,32 @@
+{
+  "schema": "openjev-m2-final-config-v1",
+  "reuses": {
+    "metal_target_dir": "target-m2-metal",
+    "cpu_target_dir": "target-m2-cpu",
+    "model_cache": "/Users/chrisraethke/.cache/openjev",
+    "all_captures_offline": true
+  },
+  "template_adjudication": {
+    "artifact_sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+    "gguf_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
+    "native_profile_sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+    "status": "reviewed-equivalent",
+    "scope": "two string messages (system then user), no tools, add_generation_prompt=true, enable_thinking=false",
+    "oracle": "fixtures/qwen-template-equivalence.json",
+    "limitations": "The templates are not identical; tools, multimodal content, assistant reasoning, and arbitrary multi-turn conversations are not approved."
+  },
+  "captures": {
+    "metal": "docs/results/m2-metal-smoke-final.jsonl",
+    "cpu": "docs/results/m2-cpu-smoke-final.jsonl",
+    "models_passed_per_device": 3,
+    "cache_hits_per_device": 3
+  },
+  "cache_regressions": {
+    "weights_in_tests": false,
+    "true_cross_process_callers": 2,
+    "observed_mock_fetches": 1,
+    "verified_reuse_after_contention": true
+  },
+  "gpu_layers_actual": null,
+  "gpu_layers_actual_note": "The safe llama-cpp-2 wrapper does not expose the actual count; selected Metal native logs are retained instead."
+}

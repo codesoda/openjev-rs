@@ -36,7 +36,10 @@ Other dependencies and external sources retain their own terms:
   MIT OR Apache-2.0; registry crates are pinned to 0.1.156.
 - [hf-hub](https://github.com/huggingface/hf-hub), Apache-2.0, pinned to 1.0.0.
 - Qwen and MiniCPM tokenizer/model sources listed in `docs/PLAN.md` remain
-  external and subject to their model cards and licenses.
+  external and subject to their model cards and licenses. Two small Qwen3 chat
+  template fixtures extracted from the exact registered GGUF and pinned native
+  tokenizer metadata are retained under `fixtures/templates/` solely for the
+  credited, integrity-pinned restricted-profile equivalence oracle.
 
 No model weights are distributed or covered by the openjev-rs MIT license.
 The material under `reference/` remains attributed to its upstream source.

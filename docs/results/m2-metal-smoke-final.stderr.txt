@@ -1,0 +1,18 @@
+Command: OPENJEV_INTEGRATION=1 GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal RUST_LOG=info cargo run -p openjev-llama --features metal --example m2_smoke -- --all --offline --device metal --gpu-layers all
+Exit: 0
+Full native stderr intentionally reduced; SHA-256 and line/byte count of the raw capture (not retained) follow.
+a890555d24cbc7f06c0a61fa9593a0c19f4c888ef1e14f8e86e0796dde016c71  /tmp/openjev-m2-metal-final.stderr
+     688   92900 /tmp/openjev-m2-metal-final.stderr
+--- selected stderr ---
+2026-09-19T08:03:59.043409Z  INFO m2_smoke::native: using canonical openjev cache cache_root=/Users/chrisraethke/.cache/openjev
+2026-09-19T08:04:11.638478Z  INFO m2_smoke::native: verified artifact SHA-256 and size model=qwen3-0.6b path=/Users/chrisraethke/.cache/openjev/hub/models--Qwen--Qwen3-0.6B-GGUF/snapshots/23749fefcc72300e3a2ad315e1317431b06b590a/Qwen3-0.6B-Q8_0.gguf cache_hit=true
+2026-09-19T08:04:24.699778Z  INFO init: llama-cpp-2: GPU name:   MTL0 (Apple M3 Pro) module="ggml::ggml_metal_device_init"
+2026-09-19T08:04:24.986672Z  INFO load_from_file: llama-cpp-2: offloaded 29/29 layers to GPU module="llama.cpp::load_tensors"
+2026-09-19T08:04:24.988901Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3-0.6b architecture=qwen3 n_ctx_train=40960 template_sha256=Some("57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361") template_status=ReviewedEquivalent load_seconds=0.288282084
+2026-09-19T08:04:57.030897Z  INFO m2_smoke::native: verified artifact SHA-256 and size model=minicpm5-2b path=/Users/chrisraethke/.cache/openjev/hub/models--openbmb--MiniCPM5-2B-GGUF/snapshots/2079a22f3beaa4e306449978533478fe0522f4b3/MiniCPM5-2B-Q4_K_M.gguf cache_hit=true
+2026-09-19T08:05:26.803095Z  INFO load_from_file: llama-cpp-2: offloaded 43/43 layers to GPU module="llama.cpp::load_tensors"
+2026-09-19T08:05:26.804785Z  INFO openjev_llama::engine: loaded pinned GGUF model=minicpm5-2b architecture=llama n_ctx_train=131072 template_sha256=Some("cc945752db555d60949b16989df4ccfeb52a313d6b4b5c5229dd786e2e9fcf1c") template_status=Exact load_seconds=0.288007583
+2026-09-19T08:06:25.504847Z  INFO m2_smoke::native: verified artifact SHA-256 and size model=qwen3.5-4b path=/Users/chrisraethke/.cache/openjev/hub/models--bartowski--Qwen_Qwen3.5-4B-GGUF/snapshots/4168f45a16a1290d65a4ec0fa312ae917a4c15d6/Qwen_Qwen3.5-4B-Q4_K_M.gguf cache_hit=true
+2026-09-19T08:07:28.195897Z  INFO load_from_file: llama-cpp-2: offloaded 34/34 layers to GPU module="llama.cpp::load_tensors"
+2026-09-19T08:07:28.198871Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3.5-4b architecture=qwen35 n_ctx_train=262144 template_sha256=Some("a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715") template_status=Exact load_seconds=0.745631417
+Note: llama.cpp also emitted 15 warnings that Qwen3.5 block-32 MTP/next-token tensors were unused by this runtime; the structured smoke remained finite. The warning is retained as an observation, not hidden or treated as M3 parity evidence.

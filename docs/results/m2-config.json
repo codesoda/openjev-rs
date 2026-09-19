@@ -1,0 +1,83 @@
+{
+  "schema": "openjev-m2-config-v1",
+  "host": {
+    "model": "Mac15,6",
+    "chip": "Apple M3 Pro",
+    "cpu_cores": 11,
+    "gpu_cores": 14,
+    "memory_bytes": 19327352832,
+    "os": "macOS 26.2 (25C56)",
+    "arch": "arm64"
+  },
+  "toolchain": {
+    "rustc": "1.95.0 (59807616e 2026-04-14)",
+    "cargo": "1.95.0 (f2d3ce0bd 2026-03-21)",
+    "cmake": "3.28.2",
+    "compiler": "Apple clang 17.0.0 (clang-1700.6.3.2)",
+    "xcode_select": "/Applications/Xcode.app/Contents/Developer"
+  },
+  "native": {
+    "llama_cpp_2": "0.1.156",
+    "llama_cpp_sys_2": "0.1.156",
+    "llama_cpp_commit": "e79e4bf660e19f2ad851e06c6913f7a8c5852621",
+    "metal": {
+      "cargo_features": ["metal"],
+      "target_dir": "target-m2-metal",
+      "cmake": {
+        "GGML_METAL": "ON",
+        "GGML_OPENMP": "OFF",
+        "GGML_NATIVE": "OFF",
+        "GGML_BLAS": "OFF",
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "gpu_layers_requested": "all",
+      "context_offload_kqv": true,
+      "context_op_offload": true
+    },
+    "cpu": {
+      "cargo_features": ["native"],
+      "target_dir": "target-m2-cpu",
+      "cmake": {
+        "GGML_METAL": "OFF",
+        "GGML_OPENMP": "OFF",
+        "GGML_NATIVE": "OFF",
+        "GGML_BLAS": "OFF",
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "gpu_layers_requested": 0,
+      "context_offload_kqv": false,
+      "context_op_offload": false
+    }
+  },
+  "cache": {
+    "root": "/Users/chrisraethke/.cache/openjev",
+    "hub": "/Users/chrisraethke/.cache/openjev/hub",
+    "combined_manifest_bytes": 5213792864,
+    "observed_initial_transfers_per_artifact": 1,
+    "offline_captures_prove_reuse_not_transport_counts": true,
+    "final_metal_capture_offline": true,
+    "final_cpu_capture_offline": true
+  },
+  "smoke": {
+    "integration_environment": "OPENJEV_INTEGRATION=1",
+    "max_tokens": 4096,
+    "n_ctx_requested": null,
+    "n_ctx_actual": 4096,
+    "n_batch": 512,
+    "n_ubatch": 512,
+    "n_seq_max": 1,
+    "kv_unified": true,
+    "passes_per_model": 2,
+    "first_pass": "warmup",
+    "second_pass": "reported warm finite readout",
+    "tokenization_bos": "never",
+    "slot_piece_buffer_bytes": 32,
+    "logits_index": "final token's chunk-local batch offset"
+  },
+  "limitations": [
+    "The safe llama-cpp-2 API does not expose an actual-offloaded-layer count, so JSON leaves gpu_layers_actual null rather than guessing.",
+    "Selected native Metal logs prove 29/29, 43/43, and 34/34 layers were offloaded for qwen3-0.6b, minicpm5-2b, and qwen3.5-4b respectively.",
+    "The true CPU build has GGML_METAL=OFF, requested zero GPU layers, disabled KQV/op offload, and enumerated only the CPU device.",
+    "M3 authored144 parity was not run."
+  ]
+}

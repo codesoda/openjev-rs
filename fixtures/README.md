@@ -16,3 +16,24 @@ Regenerate after an explicitly reviewed prompt/template change:
    bytes and update the render/hash fields.
 4. Run the 144 authored and 108 perturbation hash tests; never update this
    oracle merely to make a mismatch pass.
+
+## Qwen3 template-equivalence fixtures
+
+`templates/qwen3-gguf-57f1fd00.jinja` is the 4,100-byte
+`tokenizer.chat_template` extracted from the exact registered
+`Qwen/Qwen3-0.6B-GGUF` artifact. `templates/qwen3-native-a55ee1b1.jinja` is the
+4,168-byte template from pinned `Qwen/Qwen3-0.6B` tokenizer metadata. They are
+credited to their Qwen/Hugging Face model sources and retained here only as
+small integrity-pinned test fixtures; model weights are not included.
+
+The templates are not identical. `qwen-template-equivalence.json` records the
+parent/Astra-approved equivalence only for openjev's restricted profile:
+exactly two string system/user messages, no tools,
+`add_generation_prompt=true`, and `enable_thinking=false`. It records 144
+authored rows, 108 perturbations, all 252 reference prompt hashes, and four
+edge states. It makes no tool, multimodal, assistant-reasoning, or arbitrary
+multi-turn claim. Reproduce with Jinja2 3.1.4 (an opt-in Python dependency):
+
+```sh
+python3 scripts/verify_qwen_template_equivalence.py
+```

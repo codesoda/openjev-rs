@@ -100,3 +100,83 @@ Final gate commands all exited 0:
 - `git diff --check`; `git diff --exit-code -- reference` confirmed no reference changes.
 
 Final parent/Astra adjudication: PASS. Inspected direct field extraction, preserved-order `shift_remove`, untouched state/metadata moves, restricted prompt serializer and Python differential reserved-key regression. This resolves the last separate-Astra blocker without blacklisting valid keys. Approved the documented boundary: raw JSON and `StateValue::try_from` are depth-bounded; arbitrary upstream `serde_json::from_value` reserialization is not. Independently reran `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (54 passed), `git diff --check`, and unchanged-reference check; all passed. M1 is approved for its milestone commit; proceed to M2 with runtime claims still unverified.
+
+## M2 — pinned GGUF cache and direct smoke (initial implementation evidence)
+
+Implemented the bundled three-model manifest, registry lookup/path/pull surfaces, canonical cache-root precedence (`--cache-dir` API argument, `OPENJEV_HOME`, then `~/.cache/openjev`), hf-hub 1.0 blocking pinned-revision downloads, process-safe per-artifact locks, atomic verified receipts, complete size/SHA-256 verification on both cache resolution and every owner-worker load, explicit offline miss and corruption errors, and explicit-only repair quarantine/re-download. Before transfer, the exact pinned snapshot paths under `~/.cache/huggingface/hub` were inspected; none existed. Observed execution history showed one transfer of each artifact into `~/.cache/openjev/hub` (5,213,792,864 manifest bytes combined), followed by offline CPU reuse; retained offline captures prove reuse rather than independent transport counts. No GGUF entered the repository or test temporary directories.
+
+The native direct-smoke path uses one owner thread. Backend/model ownership and every borrowing context remain scoped inside that thread; no self-reference, unsafe workspace code, or Send workaround was added. The adapter uses `AddBos::Never`, `token_to_piece_bytes` with exact ASCII checks, the core's all-slot roundtrip/collision/vocabulary/append-boundary validation, chunk-local final `get_logits_ith`, immediate owned full-logit copying, and the core f64 readout. Each smoke performs one warmup context and one measured context. llama.cpp logs use the safe `send_logs_to_tracing` callback and remain on stderr; the example emits JSONL only on stdout and continues after a model failure/diagnostic.
+
+Runtime evidence on Mac15,6 / Apple M3 Pro / 18 GB / macOS 26.2:
+
+- Metal build: separate `target-m2-metal`, `GGML_METAL=ON`, Cargo `metal`, OpenMP off, all layers requested. CMake cache confirmed Metal ON; native logs showed Apple M3 Pro MTL and actual offload qwen3 29/29, MiniCPM5 43/43, Qwen3.5 34/34.
+- True CPU build: separate `target-m2-cpu`, `GGML_METAL=OFF`, Cargo `native`, OpenMP off, zero GPU layers, KQV and op offload disabled. CMake cache confirmed Metal OFF; safe runtime device enumeration contained CPU only.
+- All three exact artifacts loaded one at a time and produced finite Metal and CPU full-vocabulary/slot readouts at actual context 4096. Architectures/trained contexts were qwen3/40,960, llama/131,072, qwen35/262,144. Slot IDs for A/B/C were 32/33/34, 54/55/56, 32/33/34.
+- MiniCPM5 and Qwen3.5 GGUF template metadata hashes exactly matched the pinned native expectations. Qwen3-0.6B GGUF hash `57f1fd00...d0361` differs from pinned native `a55ee1b...74d8`; its structured outcome is `needs-template-adjudication`, not passed. The exact Qwen model still loaded/scored on both devices so remaining model attempts did not stall. No semantic-equivalence claim or silent template relaxation was made.
+- The safe wrapper does not expose actual offloaded-layer count, so structured output records `gpu_layers_actual: null`; selected native stderr is the actual Metal layer evidence.
+
+Detailed rows, reduced stderr, CMake/runtime configuration and timings are in `docs/RESULTS.md` and `docs/results/`. Final reproducibility captures used `OPENJEV_INTEGRATION=1 --offline`; all six artifact rows were cache hits. Invoking the harness without `OPENJEV_INTEGRATION=1` exited 2 immediately, emitted one JSON error on stdout and zero stderr bytes, and did not resolve or load a model. M3's 144-row exact Qwen hash/token gate, exhaustive parity, shared/batch algorithms, and public production CLI execution remain unimplemented and unclaimed.
+
+Final M2 local checks all exited 0 after the evidence refresh:
+
+- `cargo fmt --all` and `cargo fmt --all -- --check`.
+- `cargo check --workspace`.
+- `cargo clippy --workspace --all-targets -- -D warnings` and default-member `cargo clippy --all-targets -- -D warnings`.
+- `cargo test --workspace` — 59 tests passed (4 CLI, 49 core unit/integration, 6 backend registry/cache), 0 failed; doc-test harnesses contained 0 tests.
+- Default-member `cargo test` — 53 tests passed, 0 failed.
+- Metal `GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal cargo clippy -p openjev-llama --features metal --all-targets -- -D warnings` and matching feature test — 5 tests passed.
+- True CPU `GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu cargo clippy -p openjev-llama --features native --all-targets -- -D warnings` and matching feature test — 5 tests passed.
+
+The post-check CMake caches still reported Release, BLAS/OpenMP/native-tuning OFF in both targets, Metal ON only in `target-m2-metal`, and Metal OFF in `target-m2-cpu`. No workspace Rust source contains `unsafe`.
+
+### Targeted cache remediation and Qwen adjudication
+
+Parent/Astra blocked the initial M2 review on concrete cache safety/repair defects and separately approved a narrow Qwen template equivalence. The cache now validates portable `OWNER/NAME` and safe nested relative filename components before locks or other filesystem work. Absolute, traversal/dot, empty, backslash, Windows drive, and network-like forms fail as manifest errors; the reproduced absolute outside-file case leaves both that file and the cache root untouched. Controlled directories and resolved snapshot targets are checked against canonical ownership boundaries.
+
+HF imports now canonicalize the source to a regular file before hard-linking, so a normal `snapshots/.../file -> ../../blobs/hash` source imports bytes rather than the symlink inode. `symlink_metadata` detects dangling destinations. Without `repair`, corruption still returns an integrity/safety error without mutation or fetch. With `repair`, corrupt owned blob bytes are retained in quarantine and owned snapshots are rebuilt; a corrupt external default HF source is bypassed but never modified. Offline repair reuses a valid alternate or returns `OfflineMiss`. A stale receipt is removed before repair and is not republished until the final owned snapshot passes size/SHA verification. Unix publication renames the synced temporary receipt directly over the destination without an unlink gap.
+
+Tiny-file regressions cover malformed model fields and unchanged outside files, relative HF snapshot symlinks, dangling blobs, corrupt external + successful fetch, corrupt owned blob/snapshot + valid external reuse, failed repair with no receipt, healthy repair-enabled no-fetch reuse, and true two-process contention. The process test launches two copies of the test binary against one lock/cache/marker and observes one fetch followed by a verified reusable path. Ordinary tests contain no weights.
+
+Qwen's 4,100-byte GGUF template (`57f1fd00…d0361`) and 4,168-byte native template (`a55ee1b1…74d8`) remain explicitly nonidentical. The manifest now has an equivalence record keyed to those hashes and artifact `9465e63a…031`. Runtime status is `reviewed-equivalent` only for exactly two string system/user messages, no tools, `add_generation_prompt=true`, and `enable_thinking=false`; identical hashes report `exact`, and unseen triples report `mismatch`. Credited fixtures live outside `reference/`. The reproducible Jinja 3.1.4 oracle passed 144 authored + 108 perturbation rows, all 252 reference prompt hashes, and four recorded edge states (`<tool_response>…`, `<think>…`, Unicode/quotes, insertion-ordered structured state). No broader tools/multiturn/multimodal/reasoning claim is made.
+
+New create-only `--offline` captures in `docs/results/*-final.*` passed all three models on Metal and true CPU with `cache_hit=true`; the original mismatch evidence remains unchanged. Qwen reports `reviewed-equivalent`; MiniCPM5 and Qwen3.5 report `exact`. All six readouts are finite. `gpu_layers_actual:null` remains honest because the safe wrapper has no count API; selected Metal stderr still records 29/29, 43/43, and 34/34 layer offload.
+
+Final remediation gate commands, all exit 0:
+
+- `python3 scripts/verify_qwen_template_equivalence.py` — 144 authored, 108 perturbation, 252 reference hashes, and 4 edge states.
+- `cargo fmt --all` and `cargo fmt --all -- --check`.
+- `cargo clippy --workspace --all-targets -- -D warnings`.
+- `cargo check --workspace`.
+- `cargo test --workspace` — 72 tests passed (4 CLI, 49 core unit/integration, 19 backend registry/cache), 0 failed; doc-test harnesses contained 0 tests.
+- Default-member `cargo clippy --all-targets -- -D warnings` and `cargo test` — 53 tests passed (4 CLI, 49 core), 0 failed.
+- Metal `GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal cargo clippy -p openjev-llama --features metal --all-targets -- -D warnings` and matching feature test — 19 tests passed.
+- True CPU `GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu cargo clippy -p openjev-llama --features native --all-targets -- -D warnings` and matching feature test — 19 tests passed.
+- Offline Metal and CPU `m2_smoke --all` create-only captures — 3/3 passed on each device.
+
+M2 remediation is ready for independent parent/Astra confirmation. No commit was created, no reference file changed, and no M3/shared/batch implementation was added.
+
+### Final mutation-containment remediation
+
+Astra's final targeted re-review reproduced two mutation escapes that verification containment alone did not prevent: repair could rename a snapshot through `cache/hub -> outside`, and offline receipt invalidation could unlink through `cache/openjev/receipts -> outside`. Cache mutations now share a parent-containment check that requires a lexically normal owned path, walks existing parent components from the selected cache root, anchors each resolved directory under the canonical cache root, and additionally scopes hub mutations to the canonical hub boundary. A missing parent is a safe no-op only for removal; creation/link/rename paths require an existing validated parent. The helper checks parents rather than leaf targets, so an owned leaf symlink can still be unlinked safely without following its target.
+
+The check now precedes lock-file creation, import blob/snapshot hard links and replacement, quarantine source and destination renames/removals, receipt invalidation, temporary creation/replacement, and receipt publication. Escaping parents return `CacheSafety`; repair does not reinterpret such paths as corrupt owned artifacts. Directory creation retains its existing component-by-component containment checks. Same-user filesystem races remain explicitly out of scope.
+
+Four Unix regressions provide the focused proof:
+
+- `repair_rejects_hub_parent_symlink_without_moving_outside_snapshot`: offline repair returns `CacheSafety`, performs zero fetches, and leaves the outside snapshot sentinel byte-for-byte unchanged.
+- `offline_miss_rejects_receipts_parent_symlink_without_deleting_outside_receipt`: offline resolution returns `CacheSafety`, performs zero fetches, and leaves the outside `<sha256>.json` sentinel byte-for-byte unchanged.
+- `repair_rejects_nested_blob_parent_symlink_without_moving_outside_blob`: the same guarantee holds for a nested owned `blobs` parent symlink escape.
+- `repair_of_owned_leaf_snapshot_symlink_retains_normal_behavior`: a normal owned relative snapshot leaf symlink over corrupt owned bytes is removed without following it, the corrupt blob is quarantined, and a valid offline external artifact repairs both blob and snapshot.
+
+Final mutation-remediation commands all exited 0:
+
+- `cargo fmt --all` and `cargo fmt --all -- --check`.
+- `cargo check --workspace`.
+- `cargo clippy --workspace --all-targets -- -D warnings`.
+- `cargo test --workspace` — 76 tests passed (4 CLI, 49 core unit/integration, 23 backend registry/cache), 0 failed; doc-test harnesses contained 0 tests.
+- Default-member `cargo clippy --all-targets -- -D warnings` and `cargo test` — 53 tests passed (4 CLI, 49 core), 0 failed.
+- Metal `GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal cargo clippy -p openjev-llama --features metal --all-targets -- -D warnings` and matching feature test — 23 tests passed.
+- True CPU `GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu cargo clippy -p openjev-llama --features native --all-targets -- -D warnings` and matching feature test — 23 tests passed.
+- `git diff --check`; `git diff --exit-code -- reference` confirmed no reference changes.
+
+Per the focused review scope, the lengthy real-model CPU smokes were not rerun because engine/template code did not change; the existing create-only evidence above remains the M2 runtime record. No commit was created, no new target directory or download was used, and no M3/reference/workflow change was made. Final parent/Astra inspection: PASS. Verified canonical-parent traversal is checked before quarantine rename/unlink and receipt invalidation, separately from safe leaf-symlink removal, and that ownership boundaries are anchored to the canonical trusted root. Separate-Astra findings are resolved by targeted regressions, including unchanged outside sentinels and zero fetches. Independently reran fmt, workspace clippy with warnings denied, all 76 workspace tests, diff check and unchanged-reference check. M2 approved for commit; all six retained native smoke captures pass. M3 exact authored144 token/hash parity remains mandatory and unrun.
