@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openjev:readout:v1",
+  "oneOf": [{"$ref":"#/$defs/Readout"},{"$ref":"#/$defs/ErrorRecord"}],
+  "$defs": {
+    "Hash": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "Nonnegative": {"type":"number","minimum":0},
+    "PositiveInt": {"type":"integer","minimum":1},
+    "Token": {"type":"integer","minimum":0},
+    "Probability": {"type":"number","minimum":0,"maximum":1},
+    "Mode": {"enum":["direct","serial","shared","batch"]},
+    "Profile": {"enum":["qwen3","qwen3.5","minicpm5"]},
+    "Ids": {"type":"array","minItems":2,"maxItems":16,"uniqueItems":true,"items":{"type":"string"}},
+    "Tokens": {"type":"array","minItems":2,"maxItems":16,"uniqueItems":true,"items":{"$ref":"#/$defs/Token"}},
+    "Numbers": {"type":"array","minItems":2,"maxItems":16,"items":{"type":"number"}},
+    "Probabilities": {"type":"array","minItems":2,"maxItems":16,"items":{"$ref":"#/$defs/Probability"}},
+    "ModelMetadata": {
+      "type":"object","additionalProperties":false,
+      "required":["id","source","revision","file","quant","backend","artifact_sha256","integrity","dtype","template_profile","template_sha256","template_override"],
+      "properties": {
+        "id":{"type":"string"},"source":{"type":"string"},"revision":{"type":"string"},"file":{"type":"string"},
+        "quant":{"type":"string"},"backend":{"type":"string"},"artifact_sha256":{"$ref":"#/$defs/Hash"},
+        "integrity":{"enum":["manifest-sha256","caller-sha256","local-unverified"]},"dtype":{"type":"string"},
+        "native_reference":{"type":"object","additionalProperties":false,"required":["source","revision","dtype"],"properties":{"source":{"type":"string"},"revision":{"type":"string","pattern":"^[0-9a-f]{40}$"},"dtype":{"const":"bfloat16"}}},
+        "template_profile":{"$ref":"#/$defs/Profile"},
+        "template_sha256":{"anyOf":[{"$ref":"#/$defs/Hash"},{"type":"null"}]},
+        "template_override":{"type":"boolean"},"serving_config":{"type":"string"},
+        "adapter":{"type":["string","null"]},
+        "adapter_sha256":{"anyOf":[{"$ref":"#/$defs/Hash"},{"type":"null"}]},
+        "adapter_revision":{"type":["string","null"]},"torch_version":{"type":"string"},"transformers_version":{"type":"string"}
+      }
+    },
+    "ExecutionMetadata": {
+      "type":"object","additionalProperties":false,
+      "required":["requested_mode","effective_mode","fallback_reason","device","device_name","gpu_layers_requested","gpu_layers_actual","threads","n_ctx_requested","n_ctx_actual","max_tokens","n_batch","n_ubatch","n_seq_max","kv_unified","waves","probe_id","run_id"],
+      "properties": {
+        "requested_mode":{"$ref":"#/$defs/Mode"},"effective_mode":{"$ref":"#/$defs/Mode"},
+        "fallback_reason":{"type":["string","null"]},"device":{"enum":["cpu","metal","cuda"]},"device_name":{"type":"string"},
+        "gpu_layers_requested":{"anyOf":[{"const":"all"},{"type":"integer","minimum":0}]},
+        "gpu_layers_actual":{"type":"integer","minimum":0},"threads":{"$ref":"#/$defs/PositiveInt"},
+        "n_ctx_requested":{"anyOf":[{"$ref":"#/$defs/PositiveInt"},{"type":"null"}]},
+        "n_ctx_actual":{"$ref":"#/$defs/PositiveInt"},"max_tokens":{"$ref":"#/$defs/PositiveInt"},
+        "n_batch":{"$ref":"#/$defs/PositiveInt"},"n_ubatch":{"$ref":"#/$defs/PositiveInt"},"n_seq_max":{"$ref":"#/$defs/PositiveInt"},
+        "kv_unified":{"type":"boolean"},"waves":{"$ref":"#/$defs/PositiveInt"},
+        "probe_id":{"type":["string","null"]},"run_id":{"type":"string"},"group_id":{"type":"string"}
+      }
+    },
+    "SharedTiming": {
+      "type":"object","additionalProperties":false,
+      "required":["total_seconds","encode_seconds","prefix_tokens","prefill_seconds","replicate_seconds","suffix_forward_seconds","batch_size","true_suffix_tokens","padded_suffix_tokens"],
+      "properties": {
+        "total_seconds":{"$ref":"#/$defs/Nonnegative"},"encode_seconds":{"$ref":"#/$defs/Nonnegative"},
+        "prefix_tokens":{"type":"integer","minimum":0},"prefill_seconds":{"$ref":"#/$defs/Nonnegative"},
+        "replicate_seconds":{"$ref":"#/$defs/Nonnegative"},"suffix_forward_seconds":{"$ref":"#/$defs/Nonnegative"},
+        "batch_size":{"$ref":"#/$defs/PositiveInt"},"true_suffix_tokens":{"type":"integer","minimum":0},"padded_suffix_tokens":{"type":"integer","minimum":0}
+      }
+    },
+    "RawSample": {
+      "type":"object","additionalProperties":false,
+      "required":["permutation","option_ids","answer_token_ids","option_logits","probabilities","prompt_sha256","prompt_version","input_tokens","allowed_token_mass","full_vocab_argmax_id","full_vocab_log_normalizer","execution"],
+      "properties": {
+        "permutation":{"type":"array","minItems":2,"maxItems":16,"uniqueItems":true,"items":{"type":"integer","minimum":0,"maximum":15}},
+        "option_ids":{"$ref":"#/$defs/Ids"},"answer_token_ids":{"$ref":"#/$defs/Tokens"},
+        "option_logits":{"$ref":"#/$defs/Numbers"},"probabilities":{"$ref":"#/$defs/Probabilities"},
+        "prompt_sha256":{"$ref":"#/$defs/Hash"},"prompt_version":{"const":"direct-options-v1"},"input_tokens":{"$ref":"#/$defs/PositiveInt"},
+        "allowed_token_mass":{"$ref":"#/$defs/Probability"},"full_vocab_argmax_id":{"$ref":"#/$defs/Token"},"full_vocab_log_normalizer":{"type":"number"},
+        "forward_seconds":{"$ref":"#/$defs/Nonnegative"},"total_seconds":{"$ref":"#/$defs/Nonnegative"},
+        "execution":{"$ref":"#/$defs/ExecutionMetadata"},"shared_timing":{"$ref":"#/$defs/SharedTiming"}
+      }
+    },
+    "Postprocess": {
+      "type":"object","additionalProperties":false,
+      "required":["version","temperature","calibration_id","permutation_count","seed","permutation_algorithm","aggregation","raw_fields_reference","base_probabilities","samples"],
+      "properties": {
+        "version":{"const":"openjev-postprocess-v1"},"temperature":{"type":"number","exclusiveMinimum":0},
+        "calibration_id":{"type":["string","null"]},"permutation_count":{"type":"integer","minimum":1,"maximum":64},
+        "seed":{"type":"integer","minimum":0,"maximum":18446744073709551615},
+        "permutation_algorithm":{"const":"sha256-factoradic-v1"},"aggregation":{"const":"mean-id-aligned-probabilities"},
+        "raw_fields_reference":{"const":0},"base_probabilities":{"$ref":"#/$defs/Probabilities"},
+        "samples":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/RawSample"}}
+      }
+    },
+    "Readout": {
+      "type":"object","additionalProperties":false,
+      "required":["schema","id","primitive","choice","choice_index","option_ids","probabilities","option_logits","answer_token_ids","allowed_token_mass","full_vocab_argmax_id","full_vocab_log_normalizer","input_tokens","prompt_sha256","prompt_version","model","readout","probability_status","limitations","execution"],
+      "properties": {
+        "schema":{"const":"openjev-readout-v1"},"id":{"type":"string","minLength":1},"primitive":{"enum":["choice","noul","score"]},
+        "choice":{"type":"string"},"choice_index":{"type":"integer","minimum":0,"maximum":15},
+        "option_ids":{"$ref":"#/$defs/Ids"},"probabilities":{"$ref":"#/$defs/Probabilities"},"option_logits":{"$ref":"#/$defs/Numbers"},"answer_token_ids":{"$ref":"#/$defs/Tokens"},
+        "allowed_token_mass":{"$ref":"#/$defs/Probability"},"full_vocab_argmax_id":{"$ref":"#/$defs/Token"},"full_vocab_log_normalizer":{"type":"number"},"input_tokens":{"$ref":"#/$defs/PositiveInt"},
+        "forward_seconds":{"$ref":"#/$defs/Nonnegative"},"total_seconds":{"$ref":"#/$defs/Nonnegative"},
+        "prompt_sha256":{"$ref":"#/$defs/Hash"},"prompt_version":{"const":"direct-options-v1"},"model":{"$ref":"#/$defs/ModelMetadata"},
+        "readout":{"enum":["native full-vocabulary last-position logits restricted to declared answer slots","native selected suffix-position logits","native-state-prefix-cache-last-position","native-full-vocabulary-last-position"]},
+        "probability_status":{"const":"conditional option score; uncalibrated as decision confidence"},
+        "limitations":{"type":"array","items":{"type":"string"}},"execution":{"$ref":"#/$defs/ExecutionMetadata"},
+        "confidence":{"$ref":"#/$defs/Probability"},"confidence_status":{"const":"normalized margin; uncalibrated"},"p_yes":{"$ref":"#/$defs/Probability"},
+        "level_values":{"$ref":"#/$defs/Numbers"},"expected_value":{"type":"number"},"argmax_level":{"type":"string"},
+        "cache_hit":{"type":"boolean"},"prefix_tokens":{"type":"integer","minimum":0},"prefix_sha256":{"$ref":"#/$defs/Hash"},
+        "prefill_seconds":{"$ref":"#/$defs/Nonnegative"},"copy_seconds":{"$ref":"#/$defs/Nonnegative"},"suffix_forward_seconds":{"$ref":"#/$defs/Nonnegative"},
+        "shared_timing":{"$ref":"#/$defs/SharedTiming"},"postprocess":{"$ref":"#/$defs/Postprocess"}
+      },
+      "dependentRequired":{"confidence":["confidence_status"],"confidence_status":["confidence"]},
+      "allOf":[
+        {"if":{"properties":{"primitive":{"const":"noul"}}},"then":{"required":["p_yes"]},"else":{"not":{"required":["p_yes"]}}},
+        {"if":{"properties":{"primitive":{"const":"score"}}},"then":{"required":["level_values","expected_value","argmax_level"]},"else":{"not":{"anyOf":[{"required":["level_values"]},{"required":["expected_value"]},{"required":["argmax_level"]}]}}}
+      ]
+    },
+    "ErrorRecord": {
+      "type":"object","additionalProperties":false,"required":["schema","error"],
+      "properties": {
+        "schema":{"const":"openjev-error-v1"},"id":{"type":"string"},"parse_status":{"const":"unparsed"},
+        "error":{"type":"object","additionalProperties":false,"required":["code","message","details"],"properties":{"code":{"type":"string"},"message":{"type":"string"},"details":{"type":"object"}}}
+      }
+    }
+  }
+}

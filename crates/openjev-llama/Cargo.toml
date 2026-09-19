@@ -1,0 +1,24 @@
+[package]
+name = "openjev-llama"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+native = ["dep:hf-hub", "dep:llama-cpp-2", "dep:llama-cpp-sys-2"]
+metal = ["native", "llama-cpp-2/metal", "llama-cpp-sys-2/metal"]
+cuda = ["native", "llama-cpp-2/cuda", "llama-cpp-sys-2/cuda"]
+integration = ["native"]
+
+[dependencies]
+hf-hub = { workspace = true, optional = true }
+llama-cpp-2 = { workspace = true, optional = true }
+llama-cpp-sys-2 = { workspace = true, optional = true }
+openjev-core = { path = "../openjev-core" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

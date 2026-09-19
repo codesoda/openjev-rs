@@ -16,8 +16,9 @@ resolved there; runtime gates remain unrun. Published llama crates are 0.1.156
 also corrects the brief's empty-option validation assumption, prediction-file
 cardinality (252; select authored144 by ID), build override assumptions, and
 chat-template API limitations. [`docs/PROGRESS.md`](docs/PROGRESS.md) records
-actual evidence. **The full original brief below is preserved**, not rewritten
-as if implementation or runtime validation had occurred.
+actual evidence. M1 is implemented, independently gated, and approved by
+parent/Astra after fixing separate-review findings; M2 is next. **The full original brief
+below is preserved**, not rewritten as if later runtime validation had occurred.
 
 ---
 
@@ -268,6 +269,41 @@ Output shape for `decide` (superset of Python):
 6. Licensing: MIT for our code; keep `reference/semif-py/LICENSE` and cite in
    `THIRD_PARTY.md` (prompt strings + fixtures are copied from SemIf, MIT).
    Add TypeSafe non-affiliation note like upstream.
+
+### M1 implementation status (reviewed and approved)
+
+- [x] Three-crate workspace, exact direct dependency pins and committed-lock
+  candidate; default checks do not activate llama.cpp, hf-hub, CMake, or model
+  access.
+- [x] Validated Decision/StateValue, strict duplicate-key raw JSON ingestion,
+  insertion-order integer-only Python serialization, restricted profile
+  rendering, typed readout metadata/schema, generic slot verification, f64
+  numerics, Choice/Noul/Score adapters, and the documented eval subset.
+- [x] Offline tests cover 144/144 authored and 108/108 perturbation text hashes,
+  Python stdlib serializer/evaluator differentials, invalid/missing/tie hand
+  cases, schema parity, and JSON-only CLI help/version/error behavior.
+- [x] MIT `LICENSE`, SemIf/algorithm credit in `THIRD_PARTY.md`, and a credited
+  small prompt oracle with regeneration instructions.
+
+M1 issues discovered/resolved: `serde_json::Value` cannot reveal duplicate keys
+or original number spelling once parsed, so public source-JSON ingestion captures
+`RawValue` text and sends every string/slice/reader route through the strict
+order-preserving parser; library-built Values remain recursively revalidated.
+Finite-output serializers are explicit so nonfinite readout data errors rather
+than becoming JSON `null`.
+The optional native dependency graph is present in `Cargo.lock` but absent from
+default compilation; native/backend behavior remains deliberately unimplemented
+until M2.
+
+The first Astra M1 gate reproduced five blockers: unbounded recursive raw JSON,
+duplicate-key loss through public Serde routes, incomplete readout validation,
+catastrophic cancellation in allowed-token mass, and raw-logit/probability tie
+inconsistency. A follow-up found that the first Serde visitor fix lost lexical
+integer `-0`; it is now replaced by one boxed-RawValue-to-strict-parser route
+without admitting floating negative zero. All findings have cross-route
+regressions described in `docs/PROGRESS.md`. Subsequent ingestion-route and
+reserved-key regressions were also fixed; final parent/Astra review approved M1
+with 54 workspace tests passing. The fixes do not enter M2/M7 algorithm scope.
 
 ## 9. Later (v2+)
 

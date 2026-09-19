@@ -1,0 +1,20 @@
+{
+  "schema": "openjev-prompt-oracles-v1",
+  "source": "Restricted renderers derived from SemIf direct-options-v1 and the pinned upstream Qwen3/Qwen3.5/MiniCPM5 chat templates documented in docs/PLAN.md; SemIf is MIT, Copyright (c) 2026 TheoLeeCJ.",
+  "cases": [
+    {
+      "decision": {
+        "id": "oracle-structured-unicode",
+        "state": {"z": 1, "snow": "雪\n"},
+        "question": "Which?",
+        "options": [
+          {"id": "yes", "description": "Yes"},
+          {"id": "empty", "description": ""}
+        ]
+      },
+      "qwen3_and_qwen3_5_render": "<|im_start|>system\nApply the supplied criterion to the supplied evidence. Choose exactly one listed option. Respond with only its uppercase letter, with no explanation or reasoning.<|im_end|>\n<|im_start|>user\n{\"evidence\": {\"z\": 1, \"snow\": \"雪\\n\"}, \"criterion\": \"Which?\", \"options\": [{\"letter\": \"A\", \"description\": \"Yes\"}, {\"letter\": \"B\", \"description\": \"\"}]}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+      "qwen3_and_qwen3_5_sha256": "9adcbd1c59cc90375f89d6958cecb0964ba6d9229bf52800a517e40249ade05a",
+      "minicpm5_sha256": "fc86c374b33260de6e2b4d10c5e08b89fd32ba4b2c3ea292085e10460c740167"
+    }
+  ]
+}
