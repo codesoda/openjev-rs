@@ -176,6 +176,62 @@ fn probe_child_crash_durably_revokes_a_preexisting_synthetic_pass() {
 }
 
 #[test]
+fn cached_qwen_compact_quiet_emits_small_typed_row_without_info_logs() {
+    if !enabled() {
+        return;
+    }
+
+    let output = invoke(
+        &[
+            "--compact",
+            "--quiet",
+            "--confidence",
+            "decide",
+            "--state",
+            "state",
+            "--question",
+            "Choose",
+            "--option-id",
+            "alpha",
+            "--option-id",
+            "beta",
+            "--option",
+            "Alpha",
+            "--option",
+            "Beta",
+        ],
+        None,
+    );
+    let rows = assert_success(&output);
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row["schema"], "openjev-compact-v1");
+    assert_eq!(row["id"], "decision-1");
+    assert_eq!(row["option_ids"], serde_json::json!(["alpha", "beta"]));
+    assert_eq!(row["probabilities"].as_array().unwrap().len(), 2);
+    assert_eq!(row["probability_status"], openjev_core::PROBABILITY_STATUS);
+    assert!(row["confidence"].is_number());
+    assert!(row.get("model").is_none());
+    assert!(row.get("option_logits").is_none());
+    assert!(row.get("execution").is_none());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains(" INFO "),
+        "quiet leaked INFO logs: {stderr}"
+    );
+    assert!(
+        !stderr.contains(" DEBUG "),
+        "quiet leaked DEBUG logs: {stderr}"
+    );
+    assert!(
+        stderr
+            .lines()
+            .all(|line| line.contains(" WARN ") || line.contains(" ERROR ")),
+        "quiet emitted a non-warning diagnostic: {stderr}"
+    );
+}
+
+#[test]
 fn cached_qwen_exercises_m4_native_cli_surfaces_and_json_streams() {
     if !enabled() {
         return;

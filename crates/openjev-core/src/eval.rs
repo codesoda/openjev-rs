@@ -111,6 +111,34 @@ pub struct EvalReport {
     pub limitations: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct StabilitySummary {
+    pub pairs: usize,
+    pub eligible: usize,
+    pub missing: usize,
+    pub invalid: usize,
+    #[serde(serialize_with = "serialize_f64")]
+    pub coverage: f64,
+    #[serde(serialize_with = "serialize_opt_f64")]
+    pub modal_agreement: Option<f64>,
+    #[serde(serialize_with = "serialize_opt_f64")]
+    pub mean_total_variation: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PerturbationStabilityReport {
+    pub base_originals: usize,
+    pub perturbations: usize,
+    pub overall: StabilitySummary,
+    pub by_variant: BTreeMap<String, StabilitySummary>,
+    #[serde(serialize_with = "serialize_opt_f64")]
+    pub source_group_macro_modal_agreement: Option<f64>,
+    #[serde(serialize_with = "serialize_opt_f64")]
+    pub source_group_macro_mean_total_variation: Option<f64>,
+    pub source_groups: usize,
+    pub limitations: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 struct AlignedRow {
     id: String,
@@ -213,6 +241,242 @@ pub fn evaluate(gold: &[GoldRow], predictions: &[Prediction]) -> Result<EvalRepo
                 .to_owned(),
         ],
     })
+}
+
+/// Measure semantic-ID-aligned probability stability between the 36 authored
+/// original rows and their 108 output-blind perturbations.
+///
+/// Missing or invalid predictions remain explicit failed pairs. The caller
+/// must provide baseline predictions; this function never treats perturbation
+/// rows as their own baseline.
+pub fn evaluate_perturbation_stability(
+    authored: &[GoldRow],
+    perturbations: &[GoldRow],
+    predictions: &[Prediction],
+) -> Result<PerturbationStabilityReport> {
+    let originals: HashMap<_, _> = authored
+        .iter()
+        .filter(|row| metadata_string(row, &["provenance", "variant"]) == Some("original"))
+        .map(|row| (row.id.as_str(), row))
+        .collect();
+    if originals.is_empty() {
+        return Err(OpenJevError::Validation {
+            path: "$.authored".to_owned(),
+            message: "perturbation stability requires authored original rows".to_owned(),
+        });
+    }
+
+    let mut allowed = HashSet::with_capacity(originals.len() + perturbations.len());
+    allowed.extend(originals.keys().copied());
+    allowed.extend(perturbations.iter().map(|row| row.id.as_str()));
+    let mut indexed = HashMap::with_capacity(predictions.len());
+    for prediction in predictions {
+        if !allowed.contains(prediction.id.as_str()) {
+            return Err(OpenJevError::Validation {
+                path: "$.predictions".to_owned(),
+                message: format!("unknown stability prediction ID {:?}", prediction.id),
+            });
+        }
+        if indexed.insert(prediction.id.as_str(), prediction).is_some() {
+            return duplicate_error("predictions", &prediction.id);
+        }
+    }
+
+    #[derive(Clone)]
+    struct Pair {
+        variant: String,
+        source_group: String,
+        status: EvalStatus,
+        modal_equal: Option<bool>,
+        total_variation: Option<f64>,
+    }
+
+    let mut pairs = Vec::with_capacity(perturbations.len());
+    for perturbation in perturbations {
+        validate_gold(perturbation)?;
+        let base_id =
+            metadata_string(perturbation, &["provenance", "base_id"]).ok_or_else(|| {
+                OpenJevError::Validation {
+                    path: format!("$.perturbations[{:?}].provenance.base_id", perturbation.id),
+                    message: "missing string base_id".to_owned(),
+                }
+            })?;
+        let source_group = metadata_string(perturbation, &["provenance", "source_group_id"])
+            .ok_or_else(|| OpenJevError::Validation {
+                path: format!(
+                    "$.perturbations[{:?}].provenance.source_group_id",
+                    perturbation.id
+                ),
+                message: "missing string source_group_id".to_owned(),
+            })?;
+        let variant =
+            metadata_string(perturbation, &["provenance", "variant"]).ok_or_else(|| {
+                OpenJevError::Validation {
+                    path: format!("$.perturbations[{:?}].provenance.variant", perturbation.id),
+                    message: "missing string variant".to_owned(),
+                }
+            })?;
+        let base = originals
+            .get(base_id)
+            .ok_or_else(|| OpenJevError::Validation {
+                path: format!("$.perturbations[{:?}].provenance.base_id", perturbation.id),
+                message: format!("base original {base_id:?} is absent"),
+            })?;
+        if base.group_id != source_group
+            || perturbation.group_id != format!("{source_group}/stability")
+        {
+            return Err(OpenJevError::Validation {
+                path: format!("$.perturbations[{:?}]", perturbation.id),
+                message: "source_group_id/group_id relation does not match the authored base"
+                    .to_owned(),
+            });
+        }
+
+        let base_row = align_one(base, indexed.get(base_id).copied());
+        let candidate_row = align_one(perturbation, indexed.get(perturbation.id.as_str()).copied());
+        let status = if base_row.status == EvalStatus::Missing
+            || candidate_row.status == EvalStatus::Missing
+        {
+            EvalStatus::Missing
+        } else if base_row.status != EvalStatus::Distribution
+            || candidate_row.status != EvalStatus::Distribution
+        {
+            EvalStatus::Invalid
+        } else {
+            EvalStatus::Distribution
+        };
+        let (modal_equal, total_variation) = if status == EvalStatus::Distribution {
+            let base_probabilities = base_row
+                .probabilities
+                .as_ref()
+                .expect("distribution rows have probabilities");
+            let candidate_probabilities = candidate_row
+                .probabilities
+                .as_ref()
+                .expect("distribution rows have probabilities");
+            let base_ids: Vec<_> = base
+                .options
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect();
+            let candidate_ids: Vec<_> = perturbation
+                .options
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect();
+            if base_ids.iter().collect::<HashSet<_>>()
+                != candidate_ids.iter().collect::<HashSet<_>>()
+            {
+                return Err(OpenJevError::Validation {
+                    path: format!("$.perturbations[{:?}].options", perturbation.id),
+                    message: "semantic option IDs changed from the authored base".to_owned(),
+                });
+            }
+            let candidate_by_id: HashMap<_, _> = candidate_ids
+                .iter()
+                .zip(candidate_probabilities)
+                .map(|(id, probability)| (*id, *probability))
+                .collect();
+            let aligned_candidate: Vec<_> = base_ids.iter().map(|id| candidate_by_id[id]).collect();
+            let base_choice =
+                first_argmax(base_probabilities).expect("validated distributions are nonempty");
+            let candidate_choice =
+                first_argmax(&aligned_candidate).expect("validated distributions are nonempty");
+            let tv = 0.5
+                * base_probabilities
+                    .iter()
+                    .zip(aligned_candidate)
+                    .map(|(left, right)| (left - right).abs())
+                    .sum::<f64>();
+            (Some(base_choice == candidate_choice), Some(tv))
+        } else {
+            (None, None)
+        };
+        pairs.push(Pair {
+            variant: variant.to_owned(),
+            source_group: source_group.to_owned(),
+            status,
+            modal_equal,
+            total_variation,
+        });
+    }
+
+    fn summarize_pairs(pairs: &[&Pair]) -> StabilitySummary {
+        let eligible: Vec<_> = pairs
+            .iter()
+            .filter(|pair| pair.status == EvalStatus::Distribution)
+            .collect();
+        StabilitySummary {
+            pairs: pairs.len(),
+            eligible: eligible.len(),
+            missing: pairs
+                .iter()
+                .filter(|pair| pair.status == EvalStatus::Missing)
+                .count(),
+            invalid: pairs
+                .iter()
+                .filter(|pair| pair.status == EvalStatus::Invalid)
+                .count(),
+            coverage: ratio(eligible.len(), pairs.len()),
+            modal_agreement: mean(eligible.iter().map(|pair| {
+                if pair.modal_equal.expect("eligible pair has modal result") {
+                    1.0
+                } else {
+                    0.0
+                }
+            })),
+            mean_total_variation: mean(eligible.iter().map(|pair| {
+                pair.total_variation
+                    .expect("eligible pair has total variation")
+            })),
+        }
+    }
+
+    let all: Vec<_> = pairs.iter().collect();
+    let mut variants: BTreeMap<String, Vec<&Pair>> = BTreeMap::new();
+    let mut groups: BTreeMap<String, Vec<&Pair>> = BTreeMap::new();
+    for pair in &pairs {
+        variants.entry(pair.variant.clone()).or_default().push(pair);
+        groups
+            .entry(pair.source_group.clone())
+            .or_default()
+            .push(pair);
+    }
+    let by_variant = variants
+        .iter()
+        .map(|(variant, rows)| (variant.clone(), summarize_pairs(rows)))
+        .collect();
+    let group_summaries: Vec<_> = groups.values().map(|rows| summarize_pairs(rows)).collect();
+    Ok(PerturbationStabilityReport {
+        base_originals: originals.len(),
+        perturbations: perturbations.len(),
+        overall: summarize_pairs(&all),
+        by_variant,
+        source_group_macro_modal_agreement: mean(
+            group_summaries
+                .iter()
+                .filter_map(|summary| summary.modal_agreement),
+        ),
+        source_group_macro_mean_total_variation: mean(
+            group_summaries
+                .iter()
+                .filter_map(|summary| summary.mean_total_variation),
+        ),
+        source_groups: groups.len(),
+        limitations: vec![
+            "Stability is paired to authored original predictions by provenance.base_id; no perturbation row is used as its own baseline.".to_owned(),
+            "Total variation and modal agreement align probabilities by semantic option ID.".to_owned(),
+            "Source-group macro means weight each represented source group equally.".to_owned(),
+        ],
+    })
+}
+
+fn metadata_string<'a>(row: &'a GoldRow, path: &[&str]) -> Option<&'a str> {
+    let mut value = row.metadata.get(*path.first()?)?;
+    for key in &path[1..] {
+        value = value.as_object()?.get(*key)?;
+    }
+    value.as_str()
 }
 
 fn align_one(gold: &GoldRow, prediction: Option<&Prediction>) -> AlignedRow {
@@ -520,6 +784,84 @@ mod tests {
         }];
         let report = evaluate(&gold, &predictions).unwrap();
         assert_eq!(report.overall.accuracy, Some(1.0));
+    }
+
+    #[test]
+    fn perturbation_stability_requires_and_aligns_authored_baselines() {
+        let mut base = gold("base", "f", 0);
+        base.group_id = "source".to_owned();
+        base.metadata.insert(
+            "provenance".to_owned(),
+            serde_json::json!({"variant":"original"}),
+        );
+        let mut perturbation = gold("variant", "f", 0);
+        perturbation.group_id = "source/stability".to_owned();
+        perturbation.options.reverse();
+        perturbation.label = 1;
+        perturbation.metadata.insert(
+            "provenance".to_owned(),
+            serde_json::json!({
+                "base_id":"base",
+                "source_group_id":"source",
+                "variant":"option_reversal"
+            }),
+        );
+        let predictions = vec![
+            Prediction {
+                id: "base".to_owned(),
+                probabilities: Some(ProbabilityInput::Array(vec![0.8, 0.2])),
+                option_ids: Some(vec!["a".to_owned(), "b".to_owned()]),
+                prediction_id: None,
+                parse_status: None,
+                error: None,
+            },
+            Prediction {
+                id: "variant".to_owned(),
+                probabilities: Some(ProbabilityInput::Array(vec![0.2, 0.8])),
+                option_ids: Some(vec!["b".to_owned(), "a".to_owned()]),
+                prediction_id: None,
+                parse_status: None,
+                error: None,
+            },
+        ];
+        let report =
+            evaluate_perturbation_stability(&[base], &[perturbation], &predictions).unwrap();
+        assert_eq!(report.overall.eligible, 1);
+        assert_eq!(report.overall.modal_agreement, Some(1.0));
+        assert_eq!(report.overall.mean_total_variation, Some(0.0));
+
+        let missing = evaluate_perturbation_stability(
+            &[gold_with_original("base", "source")],
+            &[perturbation_with_base("variant", "source", "base")],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(missing.overall.missing, 1);
+        assert_eq!(missing.overall.modal_agreement, None);
+    }
+
+    fn gold_with_original(id: &str, group: &str) -> GoldRow {
+        let mut row = gold(id, "f", 0);
+        row.group_id = group.to_owned();
+        row.metadata.insert(
+            "provenance".to_owned(),
+            serde_json::json!({"variant":"original"}),
+        );
+        row
+    }
+
+    fn perturbation_with_base(id: &str, group: &str, base: &str) -> GoldRow {
+        let mut row = gold(id, "f", 0);
+        row.group_id = format!("{group}/stability");
+        row.metadata.insert(
+            "provenance".to_owned(),
+            serde_json::json!({
+                "base_id":base,
+                "source_group_id":group,
+                "variant":"wrapper"
+            }),
+        );
+        row
     }
 
     #[test]

@@ -134,8 +134,25 @@ Exactly one state source is accepted for `decide`/`noul`/`score`:
 stdin. Explicit state never reads stdin. A TTY without state is an error.
 `ask` takes one complete Decision object; `run` takes JSONL, ignores blank
 lines, preserves row order, emits and flushes per-row runtime errors and
-continues, then exits 1 if any row failed. Fatal parse/validation errors exit 2
-before native loading. For `run --output`, the create-only destination is
+continues, then exits 1 if any row failed. Add `--compact --quiet` for a small
+LLM/script-oriented decision projection while suppressing routine native INFO
+logs:
+
+```sh
+openjev --compact --quiet --offline --model qwen3-0.6b decide \
+  --state 'customer cannot sign in' \
+  --question 'Which queue?' --option Access --option Billing
+```
+
+Full `openjev-readout-v1` remains the default. Compact output applies only to
+`decide`, `noul`, `score`, `ask`, and `run`; it retains semantic option arrays,
+the exact probability honesty label, primitive-specific values, requested
+confidence, and a small execution object only on fallback. `--quiet` still
+retains WARN/ERROR and explicit fallback warnings. See
+[`docs/COMPACT.md`](docs/COMPACT.md) and
+[`schemas/compact-v1.schema.json`](schemas/compact-v1.schema.json).
+
+Fatal parse/validation errors exit 2 before native loading. For `run --output`, the create-only destination is
 reserved after complete input validation but before model startup. A startup
 failure therefore leaves a new empty file; later output failure leaves the
 already flushed prefix, stops further inference, shuts down the owner worker,

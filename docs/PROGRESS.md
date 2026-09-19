@@ -319,3 +319,65 @@ Final commands, all exit 0:
 - `git diff --check`; `git diff --exit-code -- reference` passed.
 
 The finalized matrix was not reprobed or overwritten after these review-only lifecycle/test refactors; no native scoring algorithm, tolerance or receipt configuration changed. No commit was created, no new native target directory or model download was used, and `reference/` remains unchanged. M6/M7 behavior was not added. Final parent/Astra targeted review: PASS. Confirmed exact-key lock and durable suspension precede child launch, loader checks suspension before and after receipt validation, and only a parent-matching successful passing result clears suspension. Failure/drop leaves old authorization disabled; isolated synthetic-pass tests cover this without manufacturing parity evidence. Independently reran fmt, workspace clippy with warnings denied, all 107 workspace tests, diff and unchanged-reference checks. M5 approved for commit as implemented but safely disabled on all twelve measured configurations—not as successful accelerated parity or a speedup. M6 must report shared speedup unavailable with these fallback reasons.
+
+## M6 — evaluation and benchmark checkpoint before native measurements
+
+Implementation checkpoint written before any long inference command. The working tree adds real `openjev eval` and `openjev bench` surfaces but **M6 is not yet marked passed**: all-model quality and CPU/Metal timing measurements remain pending at this checkpoint.
+
+Completed before measurement:
+
+- Embedded byte-identical, credited authored144, perturbations108 and Qwen3-0.6B 252-row browser-ladder assets in `openjev-core`; installed binaries no longer depend on the caller's working directory. Frozen SHA-256/count tests cover every asset.
+- Ported the required evaluation subset with strict unique/unknown-ID handling, every-gold-row denominators, semantic-ID probability alignment and first-tie behavior, per-family represented-class balanced accuracy/macro-F1, mean-family headlines, `1e-12` NLL floor, Brier sum, probability coverage, and null complete-distribution metrics. Imported evaluation JSON uses ordinary floating-point serde parsing rather than the integer-only state parser; malformed rows with a usable ID become explicit invalid rows.
+- Added perturbation stability joined from each `provenance.base_id` to the authored original, semantic-ID-aligned modal agreement and total variation, by-variant summaries, equal source-group macro summaries, explicit missing/invalid coverage, and a mandatory complete 36-original baseline for `perturbations108` imports. No perturbation is silently used as its own baseline.
+- Added exact published BF16 aggregate values for all three models and explicit row-level comparison only for the Qwen 252-row evidence. Full authored144 and perturbations108 Qwen rows match the preserved Python metric subset to `1e-12`; the hand differential still covers missing, invalid, semantic alignment and ties. Bootstrap/calibration fields are explicitly absent rather than fabricated.
+- Added create-only eval report/raw-prediction outputs with retained hashes, model/config metadata where present, fixture identity, limitations, and JSON-only stdout/stderr behavior. Inference-backed eval requires raw `--predictions-output` evidence and uses one direct owner-worker model load.
+- Added project-authored 703-byte and approximately 8,000-byte state fixtures plus one 21-question JSONL set. Bench validates all input/output paths before model load, requires at least five repeats, warms separately, alternates direct/requested-shared order, uses one loaded owner-worker model, excludes loading/warmup/validation/writes from timed group wall, records actual rows/tokens/timing breakdowns, and never duplicates shared group timing across rows. A failed shared receipt measures the requested/emitted serial fallback but reports `shared_speedup=null` and the exact gate failure.
+- Added M6 eval/bench JSON schemas and deterministic injected-sample median/p95/throughput tests. Backend-disabled process tests cover float prediction import, explicit invalid/missing denominator behavior, prevalidation, and create-only empty files on startup failure.
+
+Pre-measurement ordinary gate: `cargo fmt --all`, workspace clippy with `-D warnings`, and workspace tests pass. Counts at this checkpoint are 113 test functions (21 CLI, 54 core, 38 backend), with no inference in ordinary tests. No M5 probe was rerun or changed; no receipt/tolerance/backend algorithm/reference file was edited; no model was downloaded and no new native target directory was created. Next action is to build only in existing `target-m2-metal`/`target-m2-cpu`, run feature gates and CLI smokes, then create one-at-a-time quality and timing evidence under `docs/results/m6/`.
+
+## User-requested compact decision output (separate from M6)
+
+Added opt-in `--compact` projection for `decide`, `noul`, `score`, `ask`, and `run` while leaving default full readouts unchanged. Compact rows retain ID/choice, original option arrays, the exact probability honesty string, primitive-specific values, requested confidence, and only the requested/effective/fallback execution subset when fallback occurred. Errors, JSONL row flushing/continuation, create-only summaries, and `--pretty` constraints remain unchanged. Non-decision commands reject the flag with a structured validation record; help documents its scope.
+
+`--quiet` subscriber setup now uses a clap-parsed `Cli` rather than scanning argv, suppressing routine tracing/native INFO and DEBUG while retaining WARN/ERROR and explicit semantic fallback warnings. Added `docs/COMPACT.md`, `schemas/compact-v1.schema.json`, README usage, typed projection/schema tests, and backend-disabled process tests. This work does not change M6 eval/bench outputs, model listing, core Readout/storage, native scoring, probes, or benchmark files. No commit was created.
+
+Validation completed before the final test-only warning assertion: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace` all exited 0; the workspace run executed 117 tests (25 CLI, 54 core, 38 backend), 0 failed. The existing `target-m2-metal/release/openjev` was rebuilt in place with `GGML_METAL=ON ... --features metal`; no CPU binary or new target directory was built. The opt-in cached-Qwen release Metal compact/quiet process test then passed 1/1 and confirmed compact fields plus no native INFO/DEBUG stderr; one model WARN remained visible as required. A direct command also exited 0 with one `openjev-compact-v1` row and no INFO/DEBUG stderr.
+
+## M6 — bounded measurement checkpoint and handoff status
+
+This checkpoint is the durable answer to the user's status request. **M6 is not yet complete or approved. No native benchmark process is currently running.** The implementation and ordinary/feature gates are complete, all requested Metal quality runs are retained, and five of the six minimum short-state device/model benchmark cells are complete. The remaining required cell is Qwen3.5-4B true CPU. Final documentation, final post-compact gates, schema validation against a native bench report, and Astra review also remain.
+
+Completed measured quality, all on Metal with direct inference, one loaded model per command, existing verified cache, existing `target-m2-metal`, and create-only raw/report/stdout/stderr files under `docs/results/m6/`:
+
+| Model | authored144 mean-family balanced accuracy | BF16 published | perturbations108 mean-family balanced accuracy | BF16 published | perturbation modal agreement | mean TV |
+|---|---:|---:|---:|---:|---:|---:|
+| `qwen3-0.6b` | 0.4475764575 | 0.4403525153 | 0.5388007055 | 0.5276895944 | 0.8888888889 | 0.1156075405 |
+| `minicpm5-2b` | 0.6223418022 | 0.6862540338 | 0.7246913580 | 0.6925925926 | 0.8055555556 | 0.1949458361 |
+| `qwen3.5-4b` | 0.8030296329 | 0.8132381608 | 0.7754850088 | 0.7657848325 | 0.8240740741 | 0.1752005732 |
+
+These are measured pinned-GGUF/backend gaps, not quantization-only attribution. Every authored report scored 144/144 with zero invalid rows. Every perturbation report scored 108/108 plus retained predictions for the 36 authored-original baselines; stability coverage is 108/108. Qwen's approximately 0.81 expectation applies to Qwen3.5 and is met at 0.8030 as a measured non-gating result.
+
+Completed 1-state × 21-question benchmarks use five direct and five requested-shared samples in alternating order after a separate warmup. Every requested-shared sample actually emitted serial full-prompt fallback because no passing exact receipt exists. Consequently every report correctly has `shared_speedup=null`; none claims a shared speedup.
+
+| Model | Device/state | direct median group wall (s) | requested-shared fallback median (s) | status |
+|---|---|---:|---:|---|
+| `qwen3-0.6b` | Metal, 703 bytes | 3.323810 | 3.339685 | complete |
+| `minicpm5-2b` | Metal, 703 bytes | 7.042852 | 7.057393 | complete |
+| `qwen3.5-4b` | Metal, 703 bytes | 13.058682 | 13.030589 | complete |
+| `qwen3-0.6b` | Metal, 8,068 bytes | 13.196053 | 13.219938 | complete long-state coverage |
+| `qwen3-0.6b` | true CPU, 703 bytes, 11 threads, n_ctx=512 | 255.110770 | 253.567627 | complete |
+| `minicpm5-2b` | true CPU, 703 bytes, 11 threads, n_ctx=512 | 425.680628 | 444.267292 | complete but potentially host-contended; exploratory, not an isolated baseline |
+| `qwen3.5-4b` | true CPU, 703 bytes | — | — | **not run; required remaining cell** |
+
+The MiniCPM CPU capture overlapped user-requested compact-scope workspace clippy/tests and a Metal release rebuild on the same host. Its report and raw samples are preserved, but the latency is explicitly potentially contended and must not be presented as an isolated baseline. Per user instruction it was not automatically rerun for hours. A targeted rerun is the remediation if an isolated MiniCPM CPU baseline is required.
+
+An earlier Qwen CPU attempt used implicit host-default threads and automatic 4,096 context. The harness terminated it before completion, leaving create-only zero-byte report/sample/stdout files and retained native stderr. `qwen3-0.6b-cpu-short-bench.failed.json` records that failure without deriving partial timing. The successful `*-final` capture uses explicit 11 host threads and n_ctx=512; all observed fixture prompts fit and the exact configuration remained receipt-ineligible, so requested shared still safely fell back without any probe or gate change.
+
+Feature gates before measurements passed in both existing native targets: Metal and true-CPU clippy with warnings denied plus all native/CLI all-target tests. No M5 receipt was enabled, regenerated, loosened or probed; no backend algorithm, tolerance or `reference/` file changed; no model was downloaded; no new native target directory or commit was created. Because compact edits landed after those gates and rebuilt only Metal release, the CPU release binary and final feature/workspace gates must be refreshed before final review. The M3 exact gate need not be rerun solely for M6 because no engine/backend source changed, but its existing 144/144 invariant must remain noted.
+
+Bounded resume contract: first rebuild the CPU release binary in existing `target-m2-cpu` to include compact changes; run only the missing Qwen3.5 CPU short benchmark if the user/parent elects to spend the expected long runtime; do not rerun the contended MiniCPM cell unless an isolated baseline is explicitly required. Then validate one native eval and bench report against schemas, finish README/todo/RESULTS plus evidence hashes, rerun final fmt/workspace/default/Metal/CPU gates, diff/reference checks, and hand the uncommitted tree to Astra. If the Qwen3.5 CPU command exceeds the environment's long-command limit, retain zero/partial evidence and a create-only failed-attempt reason rather than fabricating or truncating a result.
+
+## Resident HTTP server extension — starting checkpoint
+
+The user requested `--serve` with Jev web API compatibility. Before that extension, the existing compact-output and partial M6 work is checkpointed separately to avoid mixing provenance. This checkpoint is **not M6 completion or a performance-gate approval**: Qwen3.5 CPU timing, final M6 review/writeup, and M7 remain outstanding as described above. No shared/batch profile has been enabled. Parent reran `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace`: all passed (117 tests, native integrations not enabled). No models were downloaded or long benchmarks started.

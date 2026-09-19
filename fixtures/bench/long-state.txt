@@ -1,0 +1,66 @@
+Synthetic operations record, authored for openjev-rs benchmarking. This document is fictional and contains no copied incident, hidden Jev material, customer information, or production credentials.
+
+INCIDENT OVERVIEW
+At 09:12 UTC on 14 March, the Atlas gateway in the west region crossed its error-rate alert threshold. Triage assigned SEV-2 because a subset of write requests failed while reads continued normally. The central and east regions remained within their normal error budgets. Edge operations acknowledged the page first at 09:15. Storage operations joined at 09:23, and messaging operations monitored downstream effects without taking ownership. No evidence indicated customer data loss. The status page was updated every fifteen minutes until recovery was confirmed.
+
+CHANGE HISTORY
+A routing policy update had been applied at 08:47, before the incident window. The update selected a newly introduced metadata field when choosing an upstream pool. The production Catalog service still returned stale metadata using the prior field shape for one west-region shard. Staging had fresh metadata and therefore did not reproduce the fault. Development used a static fixture and was also unaffected. No database migration or frontend release occurred in the relevant interval. Certificate monitors remained green, and process memory stayed below sixty percent on every gateway host.
+
+DETECTION AND TRIAGE
+The first alert came from the write error-rate threshold, not latency or capacity. Synthetic checks then reproduced failures for create and update operations routed through the affected pool. Read-only checks succeeded. Request traces showed the gateway rejecting a field before any durable write was attempted, supporting the conclusion that data was not lost. The Catalog dependency returned stale metadata, while Identity and Ledger responses matched their contracts. Engineers compared current and previous routing configurations and isolated a schema mismatch as the primary technical cause.
+
+MITIGATION
+At 09:34 the team rolled back the routing policy. The rollback reduced the failure rate but did not clear cached route selections already held by gateway workers. At 09:41 operators rerouted west-region traffic through the central pool, which reduced new failures to baseline. They did not add capacity because CPU, memory, queue occupancy, and connection counts were healthy. A controlled cache refresh followed. Write requests remained degraded briefly while retries and queued operations drained; reads and notifications stayed available. Rollback alone was therefore not sufficient, although it was a useful first mitigation.
+
+RECOVERY
+Synthetic checks were the primary signal used to confirm recovery. The success-rate graph recovered first, latency recovered second, and backlog drain lagged behind both. Queue depth was observed as supporting evidence but was not the final confirmation signal. Support ticket volume was too sparse to establish recovery. At 10:18 all synthetic create, update, and read scenarios had passed for twenty consecutive minutes. The status page moved to monitoring. At 10:42, after one more clean observation interval, the incident was closed as resolved after monitored recovery rather than cancelled or left open.
+
+CONTROL HANDLING
+The on-call did not bypass the normal receipt gate. Proposed routing changes were rendered, reviewed by a second operator, and applied through the approved control path. An emergency bypass was discussed but rejected because rerouting could be completed within the normal path. Audit records contain the reviewer identity and configuration digest. This benchmark asks only whether a bypass occurred; the answer supported by the record is no. The record does not claim that every unrelated operational control was reviewed.
+
+CUSTOMER AND COMMUNICATION IMPACT
+Some west-region customers saw failed write attempts and successful retries. Read requests remained available. Notifications were delivered normally. The team found no evidence of committed records disappearing or of requests being acknowledged before rejection. Communications used a fifteen-minute cadence. Each update distinguished observed facts from hypotheses: the first noted elevated write failures, the second noted the routing rollback, the third noted rerouting and improving success, and the final update noted monitored recovery.
+
+ROOT CAUSE
+The direct cause was a schema mismatch between a routing policy expecting a new Catalog metadata field and one production shard returning the prior shape. The introducing change was the routing policy update applied before the incident. Stale Catalog metadata made the mismatch region-specific. A missing pre-apply compatibility check allowed the configuration to pass validation. Certificate expiry and memory exhaustion were ruled out by direct measurements. The database, Identity service, Ledger service, frontend, and notification pipeline were not causal.
+
+FOLLOW-UP ACTIONS
+The highest-priority action is to add configuration validation that checks routing policies against every active Catalog schema version before publication. The Atlas gateway team owns that action and must also review the runbook. A dashboard redesign is planned but is secondary. Training will be scheduled after the validation rule and runbook revisions are complete. Security and finance teams receive the final review record but do not own the operational runbook. The Catalog team will add freshness telemetry and a forced-refresh procedure for shard metadata.
+
+EVIDENCE LOG 01
+09:12:04 — The production write error-rate alert fired for Atlas west. The alert threshold was twelve percent over five minutes. Observed error rate was nineteen percent. Latency and capacity alerts remained quiet.
+
+EVIDENCE LOG 02
+09:15:21 — Edge operations acknowledged the page. The owner field was set to Atlas gateway. Storage operations had not yet joined, and messaging operations remained unpaged.
+
+EVIDENCE LOG 03
+09:18:10 — Synthetic create requests failed in west and passed in central and east. Synthetic reads passed in all three regions. The incident commander proposed SEV-2 and recorded the assignment.
+
+EVIDENCE LOG 04
+09:23:44 — Storage operations confirmed that no write reached the durable commit stage for the rejected requests. This did not prove every customer retry succeeded, but it supported the finding of no observed data loss.
+
+EVIDENCE LOG 05
+09:27:06 — Trace comparison showed Catalog metadata field route_class_v1 on the affected shard while the policy requested route_class_v2. Identity and Ledger payloads matched their current schemas.
+
+EVIDENCE LOG 06
+09:31:52 — Change review found the routing policy update at 08:47. No database migration, certificate rotation, frontend release, or host replacement occurred between 08:00 and 09:12.
+
+EVIDENCE LOG 07
+09:34:18 — The reviewed rollback completed through the normal receipt gate. New error rate fell from nineteen percent to eleven percent, still above baseline. Existing workers retained cached route selections.
+
+EVIDENCE LOG 08
+09:41:03 — Reviewed rerouting moved west traffic through the central pool. New write failures fell below one percent. Operators explicitly declined a capacity increase because utilization metrics were healthy.
+
+EVIDENCE LOG 09
+09:48:37 — Read success and notification delivery remained normal. Write retries accumulated temporarily. The backlog-drain metric had not yet returned to baseline.
+
+EVIDENCE LOG 10
+09:56:11 — A controlled cache refresh completed. Request success reached baseline. Median latency improved, but the backlog still required observation.
+
+EVIDENCE LOG 11
+10:03:29 — The status page update stated that mitigation was in place and recovery was being monitored. This was the fourth update in the fifteen-minute communication sequence.
+
+EVIDENCE LOG 12
+10:18:00 — Synthetic create, update, and read checks had passed for twenty consecutive minutes. Queue depth continued falling. Support ticket counts were not used as the recovery criterion.
+
+

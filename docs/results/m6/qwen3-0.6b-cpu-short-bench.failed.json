@@ -1,0 +1,24 @@
+{
+  "schema": "openjev-bench-attempt-v1",
+  "status": "failed",
+  "model": "qwen3-0.6b",
+  "device": "cpu",
+  "state": "fixtures/bench/short-state.txt",
+  "questions": "fixtures/bench/questions21.jsonl",
+  "repeats": 5,
+  "attempt_configuration": {
+    "threads": "implicit host default",
+    "n_ctx": "automatic (4096 actual per retained stderr)",
+    "gpu_layers": 0,
+    "offload": false
+  },
+  "reason": "The harness terminated the command at its long-command timeout before all ten timed samples completed.",
+  "evidence": {
+    "stdout_bytes": 0,
+    "report_bytes": 0,
+    "sample_bytes": 0,
+    "stderr_file": "qwen3-0.6b-cpu-short-bench.stderr.txt",
+    "stderr_note": "Retained native stderr shows repeated real CPU contexts and work through the termination point; no timing result is inferred from the partial attempt."
+  },
+  "replacement": "A separate create-only final attempt uses explicit 11 host CPU threads and n_ctx=512, which still exceeds every observed short-fixture prompt and remains receipt-ineligible serial fallback without probing."
+}

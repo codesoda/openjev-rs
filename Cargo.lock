@@ -1868,10 +1868,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "jsonschema",
  "openjev-core",
  "openjev-llama",
  "serde",
  "serde_json",
+ "sha2",
  "tracing",
  "tracing-subscriber",
 ]

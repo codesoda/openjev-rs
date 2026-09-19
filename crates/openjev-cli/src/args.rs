@@ -10,7 +10,8 @@ const ROOT_AFTER_HELP: &str = r#"Examples:
   openjev models list
 
 State text is never trimmed or guessed as JSON. Use --state-json or
---state-json-file for structured state. stdout is JSON/JSONL only."#;
+--state-json-file for structured state. stdout is JSON/JSONL only.
+--compact applies only to decide, noul, score, ask, and run."#;
 
 #[derive(Clone, Debug, Parser)]
 #[command(
@@ -68,6 +69,9 @@ pub struct GlobalArgs {
     pub calibration: Option<PathBuf>,
     #[arg(long, global = true)]
     pub confidence: bool,
+    /// Emit the compact decision projection (decide/noul/score/ask/run only).
+    #[arg(long, global = true)]
+    pub compact: bool,
     #[arg(long, global = true)]
     pub pretty: bool,
     #[arg(long, global = true)]
@@ -88,9 +92,9 @@ pub enum Command {
     Run(RunArgs),
     /// Inspect or populate the verified model cache.
     Models(ModelsArgs),
-    /// Evaluate fixtures (implemented in M6).
+    /// Evaluate an embedded authored or perturbation fixture.
     Eval(EvalArgs),
-    /// Benchmark direct/shared execution (implemented in M6).
+    /// Benchmark direct and requested-shared execution.
     Bench(BenchArgs),
     /// Fit temperature calibration (implemented in M7).
     Calibrate(CalibrateArgs),
@@ -212,7 +216,7 @@ pub enum ModelsCommand {
 
 #[derive(Clone, Debug, Args)]
 #[command(
-    after_help = "Example (M6 surface):\n  openjev eval --fixture authored144 --predictions rows.jsonl"
+    after_help = "Examples:\n  openjev eval --fixture authored144 --predictions rows.jsonl\n  openjev --offline eval --fixture authored144 --predictions-output new-rows.jsonl --output new-report.json"
 )]
 pub struct EvalArgs {
     #[arg(long, value_enum)]
@@ -221,11 +225,17 @@ pub struct EvalArgs {
     pub predictions: Option<PathBuf>,
     #[arg(long, value_enum)]
     pub compare_to: Option<ComparisonArg>,
+    /// Create-only raw predictions for an inference-backed evaluation.
+    #[arg(long)]
+    pub predictions_output: Option<PathBuf>,
+    /// Create-only JSON evaluation report. Without it, the report uses stdout.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Args)]
 #[command(
-    after_help = "Example (M6 surface):\n  openjev bench --state-file state.txt --questions questions.jsonl"
+    after_help = "Example:\n  openjev bench --state-file fixtures/bench/long-state.txt --questions fixtures/bench/questions21.jsonl --samples-output new-samples.jsonl --output new-report.json"
 )]
 pub struct BenchArgs {
     #[arg(long)]
@@ -236,6 +246,9 @@ pub struct BenchArgs {
     pub repeats: u32,
     #[arg(long)]
     pub output: Option<PathBuf>,
+    /// Optional create-only JSONL file containing one row per timed sample.
+    #[arg(long)]
+    pub samples_output: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Args)]

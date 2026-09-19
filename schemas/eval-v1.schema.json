@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openjev:eval-command:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "fixture", "fixture_sha256", "prediction_source", "prediction_sha256", "model", "execution", "quality", "stability", "comparison", "limitations"],
+  "properties": {
+    "schema": {"const": "openjev-eval-command-v1"},
+    "fixture": {"enum": ["authored144", "perturbations108"]},
+    "fixture_sha256": {"$ref": "#/$defs/Hash"},
+    "prediction_source": {"type": "string"},
+    "prediction_sha256": {"$ref": "#/$defs/Hash"},
+    "model": {"type": ["object", "null"]},
+    "execution": {"type": ["object", "null"]},
+    "quality": {"$ref": "#/$defs/Evaluation"},
+    "stability": {"oneOf": [{"$ref": "#/$defs/Stability"}, {"type": "null"}]},
+    "comparison": {"type": ["object", "null"]},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "Hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "NullableNumber": {"type": ["number", "null"]},
+    "Summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["n", "accuracy", "balanced_accuracy", "macro_f1", "source_groups", "invalid_or_missing", "probability_rows", "probability_coverage", "nll", "brier", "nll_valid_distributions_only", "brier_valid_distributions_only", "nll_probability_floor"],
+      "properties": {
+        "n": {"type": "integer", "minimum": 0},
+        "accuracy": {"$ref": "#/$defs/NullableNumber"},
+        "balanced_accuracy": {"$ref": "#/$defs/NullableNumber"},
+        "macro_f1": {"$ref": "#/$defs/NullableNumber"},
+        "source_groups": {"type": "integer", "minimum": 0},
+        "invalid_or_missing": {"type": "integer", "minimum": 0},
+        "probability_rows": {"type": "integer", "minimum": 0},
+        "probability_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "nll": {"$ref": "#/$defs/NullableNumber"},
+        "brier": {"$ref": "#/$defs/NullableNumber"},
+        "nll_valid_distributions_only": {"$ref": "#/$defs/NullableNumber"},
+        "brier_valid_distributions_only": {"$ref": "#/$defs/NullableNumber"},
+        "nll_probability_floor": {"const": 1e-12}
+      }
+    },
+    "Evaluation": {
+      "type": "object",
+      "required": ["schema", "available_gold", "scored", "evaluated", "coverage", "missing", "invalid", "family_results", "mean_family_balanced_accuracy", "mean_family_macro_f1", "overall", "errors", "fixture_sha256", "model_sha256", "config_sha256", "limitations"],
+      "properties": {
+        "schema": {"const": "openjev-eval-v1"},
+        "available_gold": {"type": "integer", "minimum": 0},
+        "scored": {"type": "integer", "minimum": 0},
+        "evaluated": {"type": "integer", "minimum": 0},
+        "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "missing": {"type": "integer", "minimum": 0},
+        "invalid": {"type": "integer", "minimum": 0},
+        "family_results": {"type": "object", "additionalProperties": {"$ref": "#/$defs/Summary"}},
+        "mean_family_balanced_accuracy": {"$ref": "#/$defs/NullableNumber"},
+        "mean_family_macro_f1": {"$ref": "#/$defs/NullableNumber"},
+        "overall": {"$ref": "#/$defs/Summary"},
+        "errors": {"type": "array"},
+        "fixture_sha256": {"type": ["string", "null"]},
+        "model_sha256": {"type": ["string", "null"]},
+        "config_sha256": {"type": ["string", "null"]},
+        "limitations": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "StabilitySummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pairs", "eligible", "missing", "invalid", "coverage", "modal_agreement", "mean_total_variation"],
+      "properties": {
+        "pairs": {"type": "integer", "minimum": 0},
+        "eligible": {"type": "integer", "minimum": 0},
+        "missing": {"type": "integer", "minimum": 0},
+        "invalid": {"type": "integer", "minimum": 0},
+        "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "modal_agreement": {"$ref": "#/$defs/NullableNumber"},
+        "mean_total_variation": {"$ref": "#/$defs/NullableNumber"}
+      }
+    },
+    "Stability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_originals", "perturbations", "overall", "by_variant", "source_group_macro_modal_agreement", "source_group_macro_mean_total_variation", "source_groups", "limitations"],
+      "properties": {
+        "base_originals": {"type": "integer", "minimum": 1},
+        "perturbations": {"type": "integer", "minimum": 1},
+        "overall": {"$ref": "#/$defs/StabilitySummary"},
+        "by_variant": {"type": "object", "additionalProperties": {"$ref": "#/$defs/StabilitySummary"}},
+        "source_group_macro_modal_agreement": {"$ref": "#/$defs/NullableNumber"},
+        "source_group_macro_mean_total_variation": {"$ref": "#/$defs/NullableNumber"},
+        "source_groups": {"type": "integer", "minimum": 1},
+        "limitations": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

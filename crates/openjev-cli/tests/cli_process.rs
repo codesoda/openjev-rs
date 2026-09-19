@@ -102,6 +102,53 @@ fn help_metadata_uses_parsed_command_context_not_option_values() {
 }
 
 #[test]
+fn compact_is_documented_and_rejected_for_nondecision_commands() {
+    let help = Command::new(binary()).arg("--help").output().unwrap();
+    assert!(help.status.success());
+    let help = parse_one(&help.stdout);
+    assert!(help["text"].as_str().unwrap().contains("--compact"));
+    assert!(
+        help["text"]
+            .as_str()
+            .unwrap()
+            .contains("decide, noul, score, ask, and run")
+    );
+
+    for args in [
+        vec!["--compact", "models", "list"],
+        vec!["--compact", "eval", "--fixture", "authored144"],
+        vec![
+            "--compact",
+            "bench",
+            "--state-file",
+            "missing",
+            "--questions",
+            "missing",
+        ],
+        vec!["--compact", "calibrate", "--input", "missing"],
+    ] {
+        let output = Command::new(binary()).args(&args).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        let error = parse_one(&output.stderr);
+        assert_eq!(error["error"]["code"], "validation", "{args:?}");
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("decision commands")
+        );
+    }
+
+    let output = Command::new(binary())
+        .args(["--compact", "--pretty", "run"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(parse_one(&output.stderr)["error"]["code"], "validation");
+}
+
+#[test]
 fn validation_and_backend_disabled_errors_have_empty_stdout_and_stable_exits() {
     let output = Command::new(binary()).arg("unknown").output().unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -244,6 +291,105 @@ fn create_only_run_reserves_an_empty_file_before_backend_startup() {
     );
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn eval_import_accepts_floats_counts_invalid_and_missing_without_backend() {
+    let path = std::env::temp_dir().join(format!("openjev-m6-import-{}.jsonl", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    std::fs::write(
+        &path,
+        concat!(
+            "{\"id\":\"a3f18f3a63d45345942b\",\"option_ids\":[\"supported\",\"insufficient\",\"contradicted\"],\"probabilities\":[0.1,0.2,0.7]}\n",
+            "{\"id\":\"f40beba9088c8db8bbd6\",\"option_ids\":[\"supported\",\"insufficient\",\"contradicted\"],\"probabilities\":[true,0.0,0.0]}\n"
+        ),
+    )
+    .unwrap();
+    let output = Command::new(binary())
+        .args([
+            "eval",
+            "--fixture",
+            "authored144",
+            "--predictions",
+            path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty());
+    let report = parse_one(&output.stdout);
+    assert_eq!(report["schema"], "openjev-eval-command-v1");
+    assert_eq!(report["quality"]["available_gold"], 144);
+    assert_eq!(report["quality"]["scored"], 2);
+    assert_eq!(report["quality"]["invalid"], 1);
+    assert_eq!(report["quality"]["missing"], 142);
+    assert_eq!(report["quality"]["overall"]["probability_rows"], 1);
+    assert!(report["quality"]["overall"]["nll"].is_null());
+    assert!(report["quality"]["overall"]["brier"].is_null());
+    let schema_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/eval-v1.schema.json");
+    let schema: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(schema_path).unwrap()).unwrap();
+    jsonschema::validator_for(&schema)
+        .unwrap()
+        .validate(&report)
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn bench_prevalidates_repeats_inputs_and_create_only_outputs() {
+    let root = std::env::temp_dir().join(format!("openjev-m6-bench-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).unwrap();
+    let state = root.join("state.txt");
+    let questions = root.join("questions.jsonl");
+    let report = root.join("report.json");
+    let samples = root.join("samples.jsonl");
+    std::fs::write(&state, "owned benchmark state").unwrap();
+    std::fs::write(
+        &questions,
+        "{\"id\":\"q1\",\"question\":\"Which?\",\"options\":[{\"id\":\"a\",\"description\":\"A\"},{\"id\":\"b\",\"description\":\"B\"}]}\n",
+    )
+    .unwrap();
+    let output = Command::new(binary())
+        .args([
+            "bench",
+            "--state-file",
+            state.to_str().unwrap(),
+            "--questions",
+            questions.to_str().unwrap(),
+            "--repeats",
+            "4",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(parse_one(&output.stderr)["error"]["code"], "validation");
+
+    let output = Command::new(binary())
+        .args([
+            "bench",
+            "--state-file",
+            state.to_str().unwrap(),
+            "--questions",
+            questions.to_str().unwrap(),
+            "--output",
+            report.to_str().unwrap(),
+            "--samples-output",
+            samples.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        parse_one(&output.stderr)["error"]["code"],
+        "backend_unavailable"
+    );
+    assert_eq!(std::fs::metadata(report).unwrap().len(), 0);
+    assert_eq!(std::fs::metadata(samples).unwrap().len(), 0);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

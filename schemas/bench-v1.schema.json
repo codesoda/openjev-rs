@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openjev:bench:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "state_file", "state_sha256", "state_bytes", "questions_file", "questions_sha256", "questions", "repeats", "warmup", "model_load_seconds", "model", "execution", "configuration", "host", "native_sha", "direct", "requested_shared", "shared_speedup", "shared_gate_failure", "samples", "limitations"],
+  "properties": {
+    "schema": {"const": "openjev-bench-v1"},
+    "state_file": {"type": "string"},
+    "state_sha256": {"$ref": "#/$defs/Hash"},
+    "state_bytes": {"type": "integer", "minimum": 1},
+    "questions_file": {"type": "string"},
+    "questions_sha256": {"$ref": "#/$defs/Hash"},
+    "questions": {"type": "integer", "minimum": 1},
+    "repeats": {"type": "integer", "minimum": 5},
+    "warmup": {"type": "string"},
+    "model_load_seconds": {"type": "number", "minimum": 0},
+    "model": {"type": "object"},
+    "execution": {"type": "object"},
+    "configuration": {"type": "object"},
+    "host": {"type": "object"},
+    "native_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "direct": {"$ref": "#/$defs/Stats"},
+    "requested_shared": {"$ref": "#/$defs/Stats"},
+    "shared_speedup": {"type": ["number", "null"]},
+    "shared_gate_failure": {"type": ["string", "null"]},
+    "samples": {"type": "array", "minItems": 10, "items": {"$ref": "#/$defs/Sample"}},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "Hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "NullableNumber": {"type": ["number", "null"]},
+    "Stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["samples", "median_seconds", "p95_seconds", "median_decisions_per_second"],
+      "properties": {
+        "samples": {"type": "integer", "minimum": 5},
+        "median_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "p95_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "median_decisions_per_second": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "Sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repeat", "order_in_repeat", "requested_mode", "effective_mode", "fallback_reason", "probe_id", "group_wall_seconds", "decisions", "decisions_per_second", "input_tokens_sum", "prefix_tokens", "true_suffix_tokens", "encoder_seconds", "context_seconds", "forward_seconds_sum", "shared_group_forward_seconds"],
+      "properties": {
+        "repeat": {"type": "integer", "minimum": 0},
+        "order_in_repeat": {"enum": [1, 2]},
+        "requested_mode": {"enum": ["direct", "shared"]},
+        "effective_mode": {"enum": ["direct", "serial", "shared"]},
+        "fallback_reason": {"type": ["string", "null"]},
+        "probe_id": {"type": ["string", "null"]},
+        "group_wall_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "decisions": {"type": "integer", "minimum": 1},
+        "decisions_per_second": {"type": "number", "exclusiveMinimum": 0},
+        "input_tokens_sum": {"type": "integer", "minimum": 1},
+        "prefix_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "true_suffix_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "encoder_seconds": {"$ref": "#/$defs/NullableNumber"},
+        "context_seconds": {"$ref": "#/$defs/NullableNumber"},
+        "forward_seconds_sum": {"$ref": "#/$defs/NullableNumber"},
+        "shared_group_forward_seconds": {"$ref": "#/$defs/NullableNumber"}
+      }
+    }
+  }
+}

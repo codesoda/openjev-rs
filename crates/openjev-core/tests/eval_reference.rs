@@ -4,7 +4,10 @@ use std::{
     process::{Command, Stdio},
 };
 
-use openjev_core::{DecisionOption, GoldRow, Prediction, ProbabilityInput, evaluate};
+use openjev_core::{
+    DecisionOption, EvalFixture, GoldRow, Prediction, ProbabilityInput, browser_ladder_predictions,
+    evaluate, fixture_gold,
+};
 use serde_json::{Value, json};
 
 fn evaluator_path() -> PathBuf {
@@ -69,6 +72,81 @@ sys.stdout.write(json.dumps(out,allow_nan=False))
 
 fn number(value: &Value) -> Option<f64> {
     value.as_f64()
+}
+
+const SUMMARY_KEYS: &[&str] = &[
+    "n",
+    "accuracy",
+    "balanced_accuracy",
+    "macro_f1",
+    "source_groups",
+    "invalid_or_missing",
+    "probability_rows",
+    "probability_coverage",
+    "nll",
+    "brier",
+    "nll_valid_distributions_only",
+    "brier_valid_distributions_only",
+    "nll_probability_floor",
+];
+
+fn assert_metric(left: &Value, right: &Value, path: &str) {
+    match (left.as_f64(), right.as_f64()) {
+        (Some(left), Some(right)) => assert!(
+            (left - right).abs() <= 1e-12,
+            "{path}: {left:?} != {right:?}"
+        ),
+        _ => assert_eq!(left, right, "{path}"),
+    }
+}
+
+fn assert_python_subset(gold: &[GoldRow], predictions: &[Prediction]) {
+    let rust = serde_json::to_value(evaluate(gold, predictions).unwrap()).unwrap();
+    let python = python_reference(gold, predictions);
+    for key in [
+        "available_gold",
+        "scored",
+        "evaluated",
+        "coverage",
+        "missing",
+        "invalid",
+        "mean_family_balanced_accuracy",
+        "mean_family_macro_f1",
+    ] {
+        assert_metric(&rust[key], &python[key], key);
+    }
+    for key in SUMMARY_KEYS {
+        assert_metric(
+            &rust["overall"][key],
+            &python["overall"][key],
+            &format!("overall.{key}"),
+        );
+    }
+    for family in rust["family_results"].as_object().unwrap().keys() {
+        for key in SUMMARY_KEYS {
+            assert_metric(
+                &rust["family_results"][family][key],
+                &python["family_results"][family][key],
+                &format!("{family}.{key}"),
+            );
+        }
+    }
+}
+
+#[test]
+fn full_frozen_qwen_fixtures_match_python_probability_subset() {
+    let all_predictions = browser_ladder_predictions().unwrap();
+    for fixture in [EvalFixture::Authored144, EvalFixture::Perturbations108] {
+        let gold = fixture_gold(fixture).unwrap();
+        let ids: std::collections::HashSet<_> = gold.iter().map(|row| row.id.as_str()).collect();
+        let predictions: Vec<_> = all_predictions
+            .iter()
+            .filter(|prediction| ids.contains(prediction.id.as_str()))
+            .cloned()
+            .collect();
+        assert_eq!(predictions.len(), fixture.expected_rows());
+        assert_python_subset(&gold, &predictions);
+    }
 }
 
 #[test]

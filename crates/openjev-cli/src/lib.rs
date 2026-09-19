@@ -1,6 +1,8 @@
 pub mod args;
 pub mod commands;
 pub mod input;
+mod m6;
+mod m6_bench;
 pub mod output;
 
 use std::{
@@ -209,6 +211,21 @@ fn execute<R: Read, W: Write, E: Write>(
     stderr: &mut E,
 ) -> Result<i32, CliError> {
     let pretty = cli.global.pretty;
+    let compact = cli.global.compact;
+    if compact
+        && !matches!(
+            &cli.command,
+            Command::Decide(_)
+                | Command::Noul(_)
+                | Command::Score(_)
+                | Command::Ask(_)
+                | Command::Run(_)
+        )
+    {
+        return Err(CliError::validation(
+            "--compact applies only to decision commands: decide, noul, score, ask, and run",
+        ));
+    }
     match cli.command {
         Command::Decide(args) => {
             let state = input::read_state(&args.state, stdin, stdin_is_terminal)?;
@@ -228,7 +245,7 @@ fn execute<R: Read, W: Write, E: Write>(
                 cli.global.require_shared,
                 stderr,
             )?;
-            write_rows(stdout, &rows, pretty)?;
+            write_rows(stdout, &rows, pretty, compact)?;
             Ok(0)
         }
         Command::Noul(args) => {
@@ -237,7 +254,7 @@ fn execute<R: Read, W: Write, E: Write>(
             commands::check_require_shared(&cli.global, ExecutionMode::Direct)?;
             let config = commands::scoring_config(&cli.global)?;
             let rows = score_all(&config, &[item], ExecutionMode::Direct, None, false, stderr)?;
-            write_rows(stdout, &rows, pretty)?;
+            write_rows(stdout, &rows, pretty, compact)?;
             Ok(0)
         }
         Command::Score(args) => {
@@ -246,7 +263,7 @@ fn execute<R: Read, W: Write, E: Write>(
             commands::check_require_shared(&cli.global, ExecutionMode::Direct)?;
             let config = commands::scoring_config(&cli.global)?;
             let rows = score_all(&config, &[item], ExecutionMode::Direct, None, false, stderr)?;
-            write_rows(stdout, &rows, pretty)?;
+            write_rows(stdout, &rows, pretty, compact)?;
             Ok(0)
         }
         Command::Ask(args) => {
@@ -260,7 +277,7 @@ fn execute<R: Read, W: Write, E: Write>(
             commands::check_require_shared(&cli.global, ExecutionMode::Direct)?;
             let config = commands::scoring_config(&cli.global)?;
             let rows = score_all(&config, &[item], ExecutionMode::Direct, None, false, stderr)?;
-            write_rows(stdout, &rows, pretty)?;
+            write_rows(stdout, &rows, pretty, compact)?;
             Ok(0)
         }
         Command::Run(args) => {
@@ -285,6 +302,7 @@ fn execute<R: Read, W: Write, E: Write>(
                 rows,
                 requested_mode,
                 cli.global.require_shared,
+                compact,
                 args.output.as_deref(),
                 stdout,
                 stderr,
@@ -319,20 +337,8 @@ fn execute<R: Read, W: Write, E: Write>(
                 models_probe(&cli.global, &id, mode, stdout, stderr)
             }
         },
-        Command::Eval(_) => {
-            commands::reject_unimplemented_postprocessing(&cli.global)?;
-            Err(CliError::runtime(
-                "not_implemented",
-                "eval is an M6 surface and is not implemented in M4",
-            ))
-        }
-        Command::Bench(_) => {
-            commands::reject_unimplemented_postprocessing(&cli.global)?;
-            Err(CliError::runtime(
-                "not_implemented",
-                "bench is an M6 surface and is not implemented in M4",
-            ))
-        }
+        Command::Eval(args) => m6::execute_eval(&cli.global, args, pretty, stdout, stderr),
+        Command::Bench(args) => m6_bench::execute_bench(&cli.global, args, pretty, stdout, stderr),
         Command::Calibrate(_) => {
             commands::reject_unimplemented_postprocessing(&cli.global)?;
             Err(CliError::runtime(
@@ -357,11 +363,12 @@ fn write_rows<W: Write>(
     writer: &mut W,
     rows: &[openjev_core::Readout],
     pretty: bool,
+    compact: bool,
 ) -> Result<(), CliError> {
     if rows.len() == 1 {
-        output::write_json(writer, &rows[0], pretty)
+        output::write_readout(writer, &rows[0], pretty, compact)
     } else {
-        output::write_jsonl(writer, rows)
+        output::write_readout_jsonl(writer, rows, compact)
     }
     .map_err(|error| CliError::runtime("output_io", error.to_string()))
 }
@@ -391,11 +398,13 @@ fn warn_fallback_reason(
     .map_err(|error| CliError::runtime("stderr_io", error.to_string()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_run<W: Write, E: Write>(
     config: &commands::ScoringConfig,
     decisions: Vec<Decision>,
     requested_mode: ExecutionMode,
     require_shared: bool,
+    compact: bool,
     output_path: Option<&std::path::Path>,
     stdout: &mut W,
     stderr: &mut E,
@@ -421,6 +430,7 @@ fn execute_run<W: Write, E: Write>(
             config.max_sequences,
             group_id.as_deref(),
             require_shared,
+            compact,
             file,
             stderr,
         )?
@@ -433,6 +443,7 @@ fn execute_run<W: Write, E: Write>(
             config.max_sequences,
             group_id.as_deref(),
             require_shared,
+            compact,
             stdout,
             stderr,
         )?
@@ -461,6 +472,7 @@ fn execute_run_groups_and_shutdown<W: Write + ?Sized, E: Write + ?Sized>(
     max_sequences: u32,
     group_id: Option<&str>,
     require_shared: bool,
+    compact: bool,
     writer: &mut W,
     stderr: &mut E,
 ) -> Result<RunOutcome, CliError> {
@@ -473,6 +485,7 @@ fn execute_run_groups_and_shutdown<W: Write + ?Sized, E: Write + ?Sized>(
                 confidence,
                 group_id,
                 commands::fallback_reason(requested_mode),
+                compact,
                 writer,
                 stderr,
             );
@@ -489,7 +502,7 @@ fn execute_run_groups_and_shutdown<W: Write + ?Sized, E: Write + ?Sized>(
         for group in items.chunks(native_group_limit) {
             match attempt_native_group(scorer, group, requested_mode, confidence, group_id) {
                 Ok(rows) => {
-                    write_completed_group(writer, &rows)?;
+                    write_completed_group(writer, &rows, compact)?;
                     outcome.written += rows.len();
                 }
                 Err(reason) => {
@@ -506,6 +519,7 @@ fn execute_run_groups_and_shutdown<W: Write + ?Sized, E: Write + ?Sized>(
                         confidence,
                         group_id,
                         Some(&reason),
+                        compact,
                         writer,
                         stderr,
                     )?;
@@ -574,12 +588,13 @@ fn attempt_native_group(
 fn write_completed_group<W: Write + ?Sized>(
     writer: &mut W,
     rows: &[openjev_core::Readout],
+    compact: bool,
 ) -> Result<(), CliError> {
     // Shared/batch inference completes the bounded group (and all of its
     // internal waves) before any row is observable. Once complete, preserve
     // input order and flush each row.
     for row in rows {
-        write_run_row(writer, row)?;
+        write_run_readout(writer, row, compact)?;
     }
     Ok(())
 }
@@ -632,6 +647,7 @@ fn stream_run_and_shutdown_with_reason<W: Write + ?Sized, E: Write + ?Sized>(
         confidence,
         group_id,
         fallback_reason,
+        false,
         writer,
         stderr,
     );
@@ -651,6 +667,7 @@ fn stream_run_rows<W: Write + ?Sized, E: Write + ?Sized>(
     confidence: bool,
     group_id: Option<&str>,
     fallback_reason: Option<&str>,
+    compact: bool,
     writer: &mut W,
     stderr: &mut E,
 ) -> Result<RunOutcome, CliError> {
@@ -667,7 +684,7 @@ fn stream_run_rows<W: Write + ?Sized, E: Write + ?Sized>(
             group_id,
             fallback_reason,
         ) {
-            Ok(row) => write_run_row(writer, &row)?,
+            Ok(row) => write_run_readout(writer, &row, compact)?,
             Err(error) => {
                 outcome.failed += 1;
                 let error = error.with_id(item.decision().id.clone());
@@ -691,6 +708,16 @@ fn write_run_row<W: Write + ?Sized, T: serde::Serialize>(
     row: &T,
 ) -> Result<(), CliError> {
     output::write_json(writer, row, false)
+        .and_then(|()| writer.flush())
+        .map_err(|error| CliError::runtime("output_io", error.to_string()))
+}
+
+fn write_run_readout<W: Write + ?Sized>(
+    writer: &mut W,
+    row: &openjev_core::Readout,
+    compact: bool,
+) -> Result<(), CliError> {
+    output::write_readout(writer, row, false, compact)
         .and_then(|()| writer.flush())
         .map_err(|error| CliError::runtime("output_io", error.to_string()))
 }
@@ -794,12 +821,16 @@ fn require_shared_eligibility(_config: &commands::ScoringConfig) -> Result<(), C
 }
 
 #[cfg(feature = "native")]
-fn load_scorer(config: &commands::ScoringConfig) -> Result<Box<dyn DecisionScorer>, CliError> {
+pub(crate) fn load_scorer(
+    config: &commands::ScoringConfig,
+) -> Result<Box<dyn DecisionScorer>, CliError> {
     commands::NativeScorer::load(config).map(|scorer| Box::new(scorer) as Box<dyn DecisionScorer>)
 }
 
 #[cfg(not(feature = "native"))]
-fn load_scorer(_config: &commands::ScoringConfig) -> Result<Box<dyn DecisionScorer>, CliError> {
+pub(crate) fn load_scorer(
+    _config: &commands::ScoringConfig,
+) -> Result<Box<dyn DecisionScorer>, CliError> {
     Err(CliError::runtime(
         "backend_unavailable",
         "production scoring requires building openjev-cli with native, metal, or cuda",
@@ -1402,6 +1433,7 @@ mod tests {
             false,
             2,
             Some("bounded-group"),
+            false,
             false,
             &mut writer,
             &mut stderr,

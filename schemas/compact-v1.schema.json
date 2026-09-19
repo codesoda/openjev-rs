@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openjev:compact:v1",
+  "title": "openjev compact decision readout",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "choice", "option_ids", "probabilities", "probability_status"],
+  "properties": {
+    "schema": {"const": "openjev-compact-v1"},
+    "id": {"type": "string", "minLength": 1},
+    "choice": {"type": "string"},
+    "option_ids": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {"type": "string"}
+    },
+    "probabilities": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "items": {"type": "number", "minimum": 0, "maximum": 1}
+    },
+    "probability_status": {"const": "conditional option score; uncalibrated as decision confidence"},
+    "p_yes": {"type": "number", "minimum": 0, "maximum": 1},
+    "expected_value": {"type": "number"},
+    "argmax_level": {"type": "string"},
+    "level_values": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "items": {"type": "number"}
+    },
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "confidence_status": {"const": "normalized margin; uncalibrated"},
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested_mode", "effective_mode", "fallback_reason"],
+      "properties": {
+        "requested_mode": {"enum": ["direct", "serial", "shared", "batch"]},
+        "effective_mode": {"enum": ["direct", "serial", "shared", "batch"]},
+        "fallback_reason": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "dependentRequired": {
+    "confidence": ["confidence_status"],
+    "confidence_status": ["confidence"]
+  },
+  "allOf": [
+    {
+      "if": {"required": ["expected_value"]},
+      "then": {"required": ["argmax_level", "level_values"]}
+    }
+  ]
+}

@@ -6,7 +6,9 @@
     {"$ref": "#/$defs/ModelPath"},
     {"$ref": "#/$defs/Help"},
     {"$ref": "#/$defs/Version"},
-    {"$ref": "#/$defs/WriteSummary"}
+    {"$ref": "#/$defs/WriteSummary"},
+    {"$ref": "#/$defs/Eval"},
+    {"$ref": "#/$defs/Bench"}
   ],
   "$defs": {
     "Hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -76,6 +78,33 @@
         "schema": {"const": "openjev-version-v1"},
         "version": {"type": "string"},
         "build": {"type": "string"}
+      }
+    },
+    "Eval": {
+      "type": "object",
+      "required": ["schema", "fixture", "fixture_sha256", "prediction_sha256", "quality", "limitations"],
+      "properties": {
+        "schema": {"const": "openjev-eval-command-v1"},
+        "fixture": {"enum": ["authored144", "perturbations108"]},
+        "fixture_sha256": {"$ref": "#/$defs/Hash"},
+        "prediction_sha256": {"$ref": "#/$defs/Hash"},
+        "quality": {"type": "object"},
+        "limitations": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "Bench": {
+      "type": "object",
+      "required": ["schema", "state_sha256", "questions_sha256", "repeats", "direct", "requested_shared", "shared_speedup", "samples", "limitations"],
+      "properties": {
+        "schema": {"const": "openjev-bench-v1"},
+        "state_sha256": {"$ref": "#/$defs/Hash"},
+        "questions_sha256": {"$ref": "#/$defs/Hash"},
+        "repeats": {"type": "integer", "minimum": 5},
+        "direct": {"type": "object"},
+        "requested_shared": {"type": "object"},
+        "shared_speedup": {"type": ["number", "null"]},
+        "samples": {"type": "array"},
+        "limitations": {"type": "array", "items": {"type": "string"}}
       }
     },
     "WriteSummary": {

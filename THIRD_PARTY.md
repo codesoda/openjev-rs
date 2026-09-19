@@ -27,6 +27,12 @@ were copied or ported from that project under its MIT license:
 > SOFTWARE.
 
 The preserved upstream license is also at `reference/semif-py/LICENSE`.
+For installed-binary M6 evaluation, byte-identical credited copies of SemIf's
+`authored144.jsonl`, `perturbations108.jsonl`, and Qwen3-0.6B browser-ladder
+prediction rows are embedded from `crates/openjev-core/assets/`; their frozen
+hashes and provenance are recorded in that directory's README. The project-owned
+benchmark fixtures under `fixtures/bench/` are original synthetic material, not
+copied SemIf or hidden Jev data.
 
 Other dependencies and external sources retain their own terms:
 
