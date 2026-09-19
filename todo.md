@@ -1,0 +1,272 @@
+# openjev-rs — TODO / implementation brief
+
+Rust port of the **openjev.com / SemIf** idea: a "System One" decision model
+(Jev-style `Choice` / `Noul` / `Score` primitives) built by reading **next-token
+option logits from a frozen open LLM** in one forward pass — no generation.
+Ships as a library + an `openjev` CLI that takes state/question/options from
+args or stdin and prints JSON to stdout.
+
+Status: **nothing implemented yet**. This file is the brief. `reference/` holds
+the upstream material the design is derived from.
+
+---
+
+## 0. What openjev.com actually is (ground truth)
+
+- Renamed **SemIf**; independent project by TheoLeeCJ, MIT, not affiliated with
+  TypeSafe. Repo: <https://github.com/TheoLeeCJ/openjev>.
+- **No custom model.** Frozen, off-the-shelf checkpoints. Pinned artifacts
+  (`reference/semif-py/manifests/models.json`):
+
+  | id | GGUF (browser/llama.cpp) | quant | bytes | native ref |
+  | --- | --- | --- | --- | --- |
+  | `qwen3-0.6b` | `Qwen/Qwen3-0.6B-GGUF` @ `23749fef…` `Qwen3-0.6B-Q8_0.gguf` | Q8_0 | 639 MB | `Qwen/Qwen3-0.6B` @ `c1899de2…` |
+  | `minicpm5-2b` | `openbmb/MiniCPM5-2B-GGUF` @ `2079a22f…` `MiniCPM5-2B-Q4_K_M.gguf` | Q4_K_M | 1.56 GB | `openbmb/MiniCPM5-2B` @ `12a3808a…` |
+  | `qwen3.5-4b` | `bartowski/Qwen_Qwen3.5-4B-GGUF` @ `4168f45a…` `Qwen_Qwen3.5-4B-Q4_K_M.gguf` | Q4_K_M | 3.01 GB | `Qwen/Qwen3.5-4B` @ `851bf6e8…` |
+
+  (Python CLI also has a `reranker` mode on `Qwen/Qwen3-Reranker-4B` — out of
+  scope for v1.)
+
+- **Mechanism** (`reference/semif-py/src/direct.py`, `core.py`):
+  1. Messages: system = `DIRECT_SYSTEM` (exact string in `core.py`); user =
+     `json.dumps({"evidence": state, "criterion": question, "options": [{"letter": "A", "description": …}, …]}, ensure_ascii=False)`.
+  2. Apply the model's chat template with `add_generation_prompt=True,
+     enable_thinking=False`.
+  3. Verify each answer slot letter (`A`..`P`, 2–16 options) is exactly one
+     tokenizer token, round-trips, no collisions, and that `tokenize(prompt +
+     letter) == tokenize(prompt) + [slot]` (boundary check).
+  4. One forward pass, take last-position logits, index the slot ids, softmax
+     over **only** those. Nothing is sampled.
+  5. Output per row: `probabilities`, `option_logits`, `input_tokens`,
+     timings, `prompt_sha256`, `prompt_version: "direct-options-v1"`, model
+     metadata, and the honesty strings (`readout`, `probability_status`).
+- **Shared-state mode** (`shared.py`, `serial.py`): prefill the state prefix once
+  (template up to and including `{"evidence": <state>` minus the final token),
+  replicate the KV cache per question, run all suffixes as a batch, read one
+  logit row per question. This is the Jev "state once, many questions" property.
+- **Browser demo** (`webgpu-demo/worker.js`): same idea through wllama's
+  chat-completion API (`max_tokens: 1`, grammar over letters, `top_logprobs: 20`,
+  `logit_bias` on letter token ids — `labelBase` 32 for Qwen, 54 for MiniCPM).
+  Uses a *different, simpler prompt* than the Python CLI; **we follow the Python
+  prompt** (it has golden hashes and published numbers).
+- **Published quality** (native BF16, `browser-model-ladder.json`): balanced
+  accuracy authored144 / perturbations108 — 0.6B 0.440/0.528, 2B 0.686/0.693,
+  4B 0.813/0.766. TypeSafe-102 modal agreement: 4B 0.845 vs published Jev 0.883.
+- **Explicit caveats to carry over verbatim in our output**: probabilities are
+  conditional on the supplied options and *not* calibrated confidence; a forced
+  typed output can still be wrong.
+
+## 1. Goals
+
+1. `openjev` CLI: decisions in, JSON out, scriptable/pipeable, local, no server.
+2. Library crate usable from other Rust code (later: a `System1` trait shared
+   with `gliner2-rs`, see `reference/gliner2-rs-notes/jev-and-gliner.md` §5).
+3. Bit-for-bit **prompt parity** with the Python `direct-options-v1` prompt
+   (verify via `prompt_sha256` goldens) and numerically close logits.
+4. Shared-state multi-question via KV-cache sequence copy (the actual perf win).
+5. Reproduce the authored144 / perturbations108 numbers within quantization
+   tolerance, and print a timing report.
+
+Non-goals for v1: training/fine-tuning, reranker mode, HTTP server (maybe v2),
+browser/WASM, pixels/vision.
+
+## 2. Proposed layout
+
+```
+openjev-rs/
+  Cargo.toml                 # workspace
+  crates/
+    openjev-core/            # no llama dep: types, prompt, slots, softmax, calibration, eval math
+    openjev-llama/           # backend on llama-cpp-2: model registry, download, scoring, shared-state
+    openjev-cli/             # bin `openjev`
+  reference/                 # upstream material (read-only)
+  docs/                      # design notes, results
+  todo.md  README.md  PROMPT.md
+```
+
+Rationale: core stays testable without a 3 GB model; backend isolated so a
+second backend (mistral.rs / candle / remote) can be added; CLI thin.
+
+## 3. Dependencies (verify versions at start)
+
+- `llama-cpp-2` **0.1.157** (utilityai/llama-cpp-rs, master 2026-09-12;
+  llama.cpp submodule `e79e4bf6`). Features: `metal` (macOS), `cuda`, `vulkan`,
+  `openmp`, `dynamic-link`. API points confirmed present:
+  `LlamaContext::get_logits_ith(i)`, `copy_kv_cache_seq(src, dst, p0, p1)`,
+  `clear_kv_cache_seq`, `LlamaBatch` with per-token logits flag and seq ids,
+  `LlamaModel::apply_chat_template` / `chat_template()`, `token_to_str`,
+  `str_to_token`. Examples in `llama-cpp-2/examples/{simple,reranker,embeddings}`.
+- `hf-hub` (blocking) for pinned-revision GGUF download into a cache dir
+  (`~/.cache/openjev` or `$OPENJEV_HOME`), sha256 verify against manifest.
+- `clap` (derive) for the CLI, `serde`/`serde_json`, `anyhow`/`thiserror`,
+  `sha2`, `tracing` (logs → stderr only; stdout is JSON only).
+- Fallback if `llama-cpp-2` build is painful on a target: `mistralrs` 0.8.1
+  (pure Rust, GGUF, Metal/CUDA) — keep behind the backend boundary.
+
+## 4. Core semantics to implement (`openjev-core`)
+
+### 4.1 Types
+- `Decision { id, state: StateValue(String|Json), question, options: Vec<Option{id, description}> }`
+  — mirrors `validate_row` in `core.py` (2–16 options, unique ids, nonempty).
+- `Primitive`: `Choice` (the base), `Noul` (sugar: options `yes`/`no` →
+  `p_yes`), `Score` (sugar: ordered levels → distribution + expected value +
+  argmax). Score/Noul are thin layers over Choice for v1; document that.
+- `Readout { probabilities, option_logits, allowed_token_mass, full_vocab_argmax_id,
+  input_tokens, forward_seconds, total_seconds, prompt_sha256, prompt_version,
+  model{id, source, revision, quant, backend}, readout, probability_status }` —
+  match the Python field names so the JSONL is interchangeable; include the
+  extra fields the browser-ladder predictions have (`allowed_token_mass`,
+  `answer_token_ids`, `full_vocab_log_normalizer`) — they need the full-vocab
+  logits, which we have.
+- `confidence` (opt-in field): Jev's normalised margin
+  `(p_max − 1/K) / (1 − 1/K)`, labelled uncalibrated.
+
+### 4.2 Prompt (`direct-options-v1`) — must be byte-identical to Python
+- `DIRECT_SYSTEM` string verbatim.
+- User payload = `json.dumps(payload, ensure_ascii=False)` → Python default
+  separators `", "` and `": "`, key order `evidence, criterion, options`, option
+  keys `letter, description`. `serde_json` compact output uses `,`/`:` with no
+  spaces — **write a tiny custom serializer or post-process** to match Python
+  spacing. State may be a JSON object/array → must re-serialise with the same
+  Python rules (float formatting! restrict to what Python `repr` produces or
+  reject non-string state with floats until proven).
+- Chat template: prefer llama.cpp's built-in Jinja rendering of the GGUF's
+  template. **Open question**: passing `enable_thinking=false` — llama.cpp's
+  `common_chat_templates_apply` supports `chat_template_kwargs`; check whether
+  `llama-cpp-2` exposes it. If not: (a) call the sys crate's Jinja path
+  directly, or (b) hand-render the Qwen3/Qwen3.5/MiniCPM templates in Rust
+  (Qwen with `enable_thinking=false` appends `<think>\n\n</think>\n\n` after the
+  assistant header) and assert equality against the golden hashes.
+- Golden test: `reference/semif-py/browser-ladder-qwen3-0.6b.predictions.jsonl`
+  has `prompt_sha256` + `input_tokens` + `option_logits` for each authored144
+  row (join on `id` with `benchmarks/data/authored144.jsonl`). Rust must
+  reproduce the sha256 exactly and the token count exactly; logits within a
+  quant tolerance (Q8_0 vs BF16: expect argmax agreement ≥ ~98 %, logit MAE
+  small — measure and record, don't guess).
+
+### 4.3 Slots
+- Letters `ABCDEFGHIJKLMNOP` (16). Verify single-token + round-trip + no
+  collision + boundary stability, exactly as `_slot_ids` / `encode_prompt`.
+  Fail loudly, no silent fallback.
+- v2 idea: extend to 20–26 or two-char labels only if boundary checks pass.
+
+### 4.4 Numerics
+- Softmax over slot logits in f64 (Python does f32 logits → f64 math).
+- `allowed_token_mass` = Σ exp(slot − logsumexp(full vocab)).
+- Optional post-hoc: option-order permutation averaging (`--permute N`,
+  align by option id), temperature scaling (`--temperature T` on slot logits,
+  plus a `calibrate` subcommand that fits T on labelled JSONL). Both clearly
+  marked as deviations from `direct-options-v1` (bump `prompt_version` /
+  add `postprocess` field).
+
+### 4.5 Eval math
+- Port the metric subset from `benchmarks/evaluate.py` needed for
+  authored144 + perturbations108: per-family balanced accuracy, mean family
+  balanced accuracy, plain accuracy, NLL/Brier. Perturbation stability = align
+  by option id across variants of a `group_id`.
+
+## 5. Backend (`openjev-llama`)
+
+- `ModelRegistry`: the three pinned GGUFs (+ arbitrary `--model path.gguf` /
+  `--model hf:repo@rev:file`). Download via `hf-hub` to cache; verify bytes
+  against `models.json` sizes (sha256 if we record them once).
+- `Engine::load(model, opts{ n_ctx (default 4096, auto-grow to prompt), n_batch,
+  n_gpu_layers=all, threads })`. One `LlamaBackend`, one model, contexts per
+  run.
+- `score_direct(&Decision) -> Readout`: tokenize prompt via chat template,
+  slot checks, batch with `logits=true` only on the last token, `decode`,
+  `get_logits_ith(last)`, gather slots, softmax, timings.
+- `score_shared(state, &[Question]) -> Vec<Readout>`: build prefix exactly as
+  `shared.py::_state_prefix` (drop last token), verify every full prompt starts
+  with it, prefill into seq 0, `copy_kv_cache_seq(0, i, ..)` for i in 1..n,
+  batch every suffix with its seq id and `logits=true` on each suffix end, one
+  `decode` (chunk by `n_batch` if needed), read per-seq logits. Then clear
+  seqs 1..n for reuse; keep seq 0 as a warm state cache for a REPL/`--watch`
+  mode later.
+  - **Risk**: Qwen3.5 is a hybrid (Gated DeltaNet + attention). llama.cpp's
+    hybrid memory supports full-sequence `seq_cp` but not partial rollback
+    (the crate warns about this on `clear_kv_cache_seq`). Validate shared-mode
+    logits == direct-mode logits (tolerance ~1e-3) on all three models; if a
+    model fails, fall back to serial per-question full prompts for it.
+- `score_batch(&[Decision])`: independent decisions packed into one batch
+  with distinct seq ids (throughput for JSONL scoring).
+- Thread safety: llama contexts are `!Send` in places; keep a single worker
+  thread owning the engine and a channel API so the CLI/library can be async
+  later.
+
+## 6. CLI (`openjev`)
+
+All results to **stdout as JSON** (one object, or JSONL for multi), logs to
+stderr, non-zero exit on validation/model errors. `--pretty` for indented.
+
+```
+openjev decide  --question "Which queue?" --option "Account access" --option "Billing" \
+                [--state "..." | --state-file f | (stdin = state)] [--id x]
+openjev noul    --question "Is this phishing?" [state via stdin]        # → p_yes
+openjev score   --question "How urgent?" --level low --level medium --level high
+openjev run     [--mode direct|shared|batch] [--input f.jsonl | stdin JSONL] [--output f]  # semif-score parity
+openjev ask     --json '{"state":..,"question":..,"options":[..]}'      # raw row
+openjev models  [list | pull <id> | path <id>]
+openjev eval    --fixture authored144|perturbations108 [--compare-to browser-ladder]
+openjev calibrate --input labelled.jsonl  → temperature
+openjev bench   --state-file big.txt --questions q.jsonl  # direct vs shared timing
+```
+Global: `--model qwen3.5-4b|minicpm5-2b|qwen3-0.6b|<path|hf spec>` (default
+`minicpm5-2b`, like the site), `--n-ctx`, `--threads`, `--gpu-layers`,
+`--permute N`, `--temperature T`, `--confidence`, `--quiet`.
+
+stdin rules: if stdin is not a TTY and no `--state`, stdin is the state for
+`decide/noul/score`; for `run` stdin is JSONL. Multiple `--question` on
+`decide` with one state ⇒ shared mode automatically.
+
+Output shape for `decide` (superset of Python):
+```json
+{"id":"…","choice":"billing","choice_index":1,"probabilities":[…],"option_ids":[…],
+ "option_logits":[…],"confidence":0.42,"allowed_token_mass":0.99,"input_tokens":142,
+ "forward_seconds":0.08,"total_seconds":0.09,"prompt_sha256":"…","prompt_version":"direct-options-v1",
+ "model":{"id":"qwen3.5-4b","source":"bartowski/Qwen_Qwen3.5-4B-GGUF","revision":"…","file":"…","quant":"Q4_K_M","backend":"llama-cpp-2/<llama.cpp sha>"},
+ "readout":"native full-vocabulary last-position logits restricted to declared answer slots",
+ "probability_status":"conditional option score; uncalibrated as decision confidence"}
+```
+
+## 7. Tests & acceptance
+
+- Unit (no model): Python-compatible JSON serialisation, prompt assembly,
+  softmax/confidence, eval metrics against small hand cases, CLI arg parsing.
+- Golden (downloads Qwen3-0.6B Q8_0, ~640 MB; behind `--features integration`
+  or `OPENJEV_INTEGRATION=1`): for all 144 authored rows — sha256 and
+  `input_tokens` identical to `browser-ladder-qwen3-0.6b.predictions.jsonl`;
+  argmax agreement and logit deltas reported; shared vs direct logit parity.
+- Eval: `openjev eval --fixture authored144 --model qwen3.5-4b` prints balanced
+  accuracy; expect ≈ 0.81 (BF16 ref) minus a quantization gap — record actual.
+- Perf: on the dev Mac (Metal) and on CPU-only, report direct latency per
+  model and shared-mode speedup for 1 state × 21 questions (shape of
+  `shape777`). Put numbers in `docs/RESULTS.md`.
+- `cargo clippy -D warnings`, `cargo fmt --check`, `cargo test` green.
+
+## 8. Open questions / risks (resolve early, in this order)
+
+1. Does `llama-cpp-2` 0.1.157's llama.cpp build support **Qwen3.5** (hybrid
+   GDN) and **MiniCPM5** architectures? Load each GGUF in a smoke test on day 1.
+   If one fails: try building the sys crate against a newer llama.cpp
+   (`LLAMA_CPP_PATH`/`dynamic-link`), or drop that model from the default list.
+2. Chat template with `enable_thinking=false` through the crate (see 4.2).
+3. Python-compatible `json.dumps` spacing/float formatting for structured state.
+4. Shared-mode correctness on hybrid models (see 5).
+5. Metal build flags / `n_gpu_layers` defaults on Apple Silicon; CUDA feature
+   on Linux — CI matrix minimal (macOS arm64 + Linux x86 CPU).
+6. Licensing: MIT for our code; keep `reference/semif-py/LICENSE` and cite in
+   `THIRD_PARTY.md` (prompt strings + fixtures are copied from SemIf, MIT).
+   Add TypeSafe non-affiliation note like upstream.
+
+## 9. Later (v2+)
+
+- `System1` trait crate shared with `gliner2-rs` (`choice/noul/score` →
+  distribution), so callers can swap a 194M encoder for a 4B decoder per
+  question.
+- `serve` (HTTP, JSON, warm state cache), `--watch` REPL keeping one state
+  prefilled.
+- Reranker mode (`Qwen3-Reranker-4B` yes/no log-odds per option).
+- Larger option cardinality (two-char slots), shortlist-then-choose for >16.
+- Conformal / temperature calibration tooling with reliability diagrams.
+- mistral.rs backend; WASM is out of scope (the site already covers it).

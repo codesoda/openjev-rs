@@ -1,0 +1,5 @@
+target/
+*.gguf
+models/
+.DS_Store
+/out/
