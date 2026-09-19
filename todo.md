@@ -9,6 +9,16 @@ args or stdin and prints JSON to stdout.
 Status: **nothing implemented yet**. This file is the brief. `reference/` holds
 the upstream material the design is derived from.
 
+Phase A update: design/source adjudication is in [`docs/PLAN.md`](docs/PLAN.md),
+reviewed by parent/Astra and approved for M1. All six section-8 choices and failure policies are
+resolved there; runtime gates remain unrun. Published llama crates are 0.1.156
+(0.1.157 is currently Git-only), with the expected e79e4bf6 native pin. The plan
+also corrects the brief's empty-option validation assumption, prediction-file
+cardinality (252; select authored144 by ID), build override assumptions, and
+chat-template API limitations. [`docs/PROGRESS.md`](docs/PROGRESS.md) records
+actual evidence. **The full original brief below is preserved**, not rewritten
+as if implementation or runtime validation had occurred.
+
 ---
 
 ## 0. What openjev.com actually is (ground truth)
