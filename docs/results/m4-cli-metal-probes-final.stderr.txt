@@ -1,0 +1,20 @@
+decide: bytes=24405 sha256=dfee3883361d5dc18f7022433d350233a3ab285ce8acb732a49b6f7cd6af09d4
+  2026-09-19T09:48:56.847931Z  INFO load_from_file: llama-cpp-2: offloaded 29/29 layers to GPU module="llama.cpp::load_tensors"
+  2026-09-19T09:48:56.849238Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3-0.6b architecture=qwen3 n_ctx_train=40960 template_sha256=Some("57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361") template_status=ReviewedEquivalent load_seconds=0.301804959
+noul-stdin: bytes=24405 sha256=5cce3f936b8ba4dea1cd6cd05522fe1d87d230190bee040acf370bb9206aac21
+  2026-09-19T09:48:58.215648Z  INFO load_from_file: llama-cpp-2: offloaded 29/29 layers to GPU module="llama.cpp::load_tensors"
+  2026-09-19T09:48:58.216305Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3-0.6b architecture=qwen3 n_ctx_train=40960 template_sha256=Some("57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361") template_status=ReviewedEquivalent load_seconds=0.293868334
+score-json: bytes=24405 sha256=b81c74513269c2d8794e078f352bed98c8bdfbf3896048d7058f6bdf406c4f3b
+  2026-09-19T09:48:59.550903Z  INFO load_from_file: llama-cpp-2: offloaded 29/29 layers to GPU module="llama.cpp::load_tensors"
+  2026-09-19T09:48:59.552142Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3-0.6b architecture=qwen3 n_ctx_train=40960 template_sha256=Some("57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361") template_status=ReviewedEquivalent load_seconds=0.277185125
+ask-stdin: bytes=24405 sha256=486d168db87564d81e744d3cb087a3d10115edf760a09b6331d3f9fb361dc40b
+  2026-09-19T09:49:00.882980Z  INFO load_from_file: llama-cpp-2: offloaded 29/29 layers to GPU module="llama.cpp::load_tensors"
+  2026-09-19T09:49:00.883927Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3-0.6b architecture=qwen3 n_ctx_train=40960 template_sha256=Some("57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361") template_status=ReviewedEquivalent load_seconds=0.256996459
+run-jsonl: bytes=29374 sha256=42ec93d342e1fcd4620b2cf1db925b05f5e32f56e4d6d528ea1d082208c70337
+  2026-09-19T09:49:02.204595Z  INFO load_from_file: llama-cpp-2: offloaded 29/29 layers to GPU module="llama.cpp::load_tensors"
+  2026-09-19T09:49:02.206410Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3-0.6b architecture=qwen3 n_ctx_train=40960 template_sha256=Some("57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361") template_status=ReviewedEquivalent load_seconds=0.265368042
+multi-shared-fallback: bytes=29491 sha256=9e5fa86ff39f89305ce3918a974c4248c9e785246d64d4141b40a2259cb3abb7
+  warning: requested Shared; using serial full-prompt fallback: shared execution is not implemented or probed until M5
+  2026-09-19T09:49:03.603837Z  INFO load_from_file: llama-cpp-2: offloaded 29/29 layers to GPU module="llama.cpp::load_tensors"
+  2026-09-19T09:49:03.605323Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3-0.6b architecture=qwen3 n_ctx_train=40960 template_sha256=Some("57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361") template_status=ReviewedEquivalent load_seconds=0.281759916
+require-shared: bytes=161 sha256=0f77a423221a0fc74a1df60fb85b41ad9a198e12a54277fdd5ecec480b2e104d

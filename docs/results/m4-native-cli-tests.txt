@@ -1,0 +1,12 @@
+   Compiling openjev-llama v0.1.0 (/Users/chrisraethke/projects/openjev-rs/crates/openjev-llama)
+   Compiling openjev-cli v0.1.0 (/Users/chrisraethke/projects/openjev-rs/crates/openjev-cli)
+    Finished `release` profile [optimized] target(s) in 12.03s
+     Running tests/native_cli.rs (target-m2-metal/release/deps/native_cli-e6403571a7353d83)
+
+running 3 tests
+test custom_local_artifact_requires_and_records_explicit_profile_override ... ok
+test run_continues_after_runtime_row_failure_and_output_is_create_only ... ok
+test cached_qwen_exercises_m4_native_cli_surfaces_and_json_streams ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.96s
+

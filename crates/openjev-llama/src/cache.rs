@@ -99,11 +99,27 @@ impl ModelCache {
 
     #[must_use]
     pub fn model_path(&self, model: &ModelEntry) -> PathBuf {
+        self.custom_hub_path(&model.repo, &model.revision, &model.file)
+    }
+
+    #[must_use]
+    pub fn custom_hub_path(&self, repo: &str, revision: &str, file: &str) -> PathBuf {
         self.hub_root()
-            .join(repo_folder(model))
+            .join(format!("models--{}", repo.replace('/', "--")))
             .join("snapshots")
-            .join(&model.revision)
-            .join(&model.file)
+            .join(revision)
+            .join(file)
+    }
+
+    /// Inspect a registered cache entry without fetching, repairing, locking, or
+    /// publishing a receipt.
+    pub fn inspect(&self, model: &ModelEntry) -> Result<Option<VerifiedArtifact>> {
+        model.validate()?;
+        let path = self.model_path(model);
+        if !path_present(&path)? {
+            return Ok(None);
+        }
+        self.verify_owned_path(model, &path).map(Some)
     }
 
     #[cfg(feature = "native")]
@@ -235,7 +251,7 @@ impl ModelCache {
             });
         }
 
-        self.create_contained_dir(&self.root, &self.hub_root())?;
+        self.prepare_hub_download(&model.repo, &model.revision, &model.file)?;
         let fetched = fetch(model, &self.hub_root())?;
         let fetched_canonical = self.verify_external_source(model, &fetched)?;
         let snapshot_canonical = fs::canonicalize(&snapshot).ok();
@@ -248,10 +264,115 @@ impl ModelCache {
         Ok(artifact)
     }
 
+    /// Resolve a caller-hashed Hub artifact through the same owned-cache
+    /// containment machinery as registered artifacts.
+    ///
+    /// The complete hf-hub directory shape that may be mutated for this pinned
+    /// repository/file is created and containment-checked before `fetch` runs.
+    /// This is deliberately separate from [`Self::ensure_with`] because custom
+    /// Hub specs know a SHA-256 but do not have a trusted byte length.
+    #[cfg(any(feature = "native", test))]
+    pub(crate) fn ensure_hub_sha256_with<F>(
+        &self,
+        repo: &str,
+        revision: &str,
+        file: &str,
+        expected_sha256: &str,
+        offline: bool,
+        fetch: F,
+    ) -> Result<VerifiedArtifact>
+    where
+        F: FnOnce(&Path) -> Result<PathBuf>,
+    {
+        let model_id = format!("hf:{repo}@{revision}:{file}");
+        let _lock = self.lock_sha256(expected_sha256)?;
+        let snapshot = self.custom_hub_path(repo, revision, file);
+        self.prepare_hub_download(repo, revision, file)?;
+
+        if path_present(&snapshot)? {
+            return self.verify_caller_owned_path(&model_id, &snapshot, expected_sha256, true);
+        }
+        if offline {
+            return Err(BackendError::OfflineMiss {
+                model_id,
+                path: snapshot,
+            });
+        }
+
+        let downloaded = fetch(&self.hub_root())?;
+        if downloaded != snapshot {
+            return Err(BackendError::CacheSafety {
+                path: downloaded,
+                message: format!(
+                    "Hub downloader returned a path other than the owned pinned snapshot {}",
+                    snapshot.display()
+                ),
+            });
+        }
+        self.verify_caller_owned_path(&model_id, &snapshot, expected_sha256, false)
+    }
+
+    fn prepare_hub_download(&self, repo: &str, revision: &str, file: &str) -> Result<()> {
+        let hub_root = self.hub_root();
+        self.create_contained_dir(&self.root, &hub_root)?;
+        let repository = hub_root.join(format!("models--{}", repo.replace('/', "--")));
+        let lock_repository = hub_root
+            .join(".locks")
+            .join(format!("models--{}", repo.replace('/', "--")));
+        let snapshot = repository.join("snapshots").join(revision).join(file);
+        let no_exist = repository.join(".no_exist").join(revision).join(file);
+        for directory in [
+            lock_repository,
+            repository.join("blobs"),
+            snapshot
+                .parent()
+                .expect("validated Hub filename has a parent")
+                .to_path_buf(),
+            no_exist
+                .parent()
+                .expect("validated Hub filename has a parent")
+                .to_path_buf(),
+        ] {
+            self.create_contained_dir(&hub_root, &directory)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(any(feature = "native", test))]
+    fn verify_caller_owned_path(
+        &self,
+        model_id: &str,
+        path: &Path,
+        expected_sha256: &str,
+        cache_hit: bool,
+    ) -> Result<VerifiedArtifact> {
+        let canonical = self.canonical_owned_regular(path, &self.hub_root())?;
+        let (bytes, sha256) = hash_file(&canonical)?;
+        if sha256 != expected_sha256 {
+            return Err(BackendError::CallerIntegrity {
+                path: canonical,
+                expected_sha256: expected_sha256.to_owned(),
+                actual_sha256: sha256,
+            });
+        }
+        Ok(VerifiedArtifact {
+            model_id: model_id.to_owned(),
+            path: path.to_path_buf(),
+            bytes,
+            sha256,
+            cache_hit,
+            imported_from_huggingface_cache: false,
+        })
+    }
+
     fn lock_model(&self, model: &ModelEntry) -> Result<File> {
+        self.lock_sha256(&model.sha256)
+    }
+
+    pub(crate) fn lock_sha256(&self, sha256: &str) -> Result<File> {
         let directory = self.root.join("openjev/locks");
         self.create_contained_dir(&self.root, &directory)?;
-        let path = directory.join(format!("{}.lock", model.sha256));
+        let path = directory.join(format!("{sha256}.lock"));
         self.require_mutation_parent(&path, &directory)?;
         let file = OpenOptions::new()
             .create(true)
@@ -897,6 +1018,230 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, BackendError::Integrity { .. }));
         assert_eq!(fs::read(cache.model_path(&model)).unwrap(), b"corrupt");
+    }
+
+    #[test]
+    fn custom_hub_mock_download_and_offline_reuse_stay_owned() {
+        let temp = TempDir::new().unwrap();
+        let cache = ModelCache::new(temp.path().join("openjev"));
+        let contents = b"custom Hub bytes";
+        let expected_sha256 = digest_hex(&Sha256::digest(contents));
+        let revision = "0123456789abcdef0123456789abcdef01234567";
+        let file = "nested/custom.gguf";
+        let snapshot = cache.custom_hub_path("owner/repo", revision, file);
+        let fetched = cache
+            .ensure_hub_sha256_with(
+                "owner/repo",
+                revision,
+                file,
+                &expected_sha256,
+                false,
+                |_| write_fetch(&snapshot, contents),
+            )
+            .unwrap();
+        assert!(!fetched.cache_hit);
+        assert_eq!(fetched.path, snapshot);
+        assert_eq!(fetched.bytes, u64::try_from(contents.len()).unwrap());
+
+        let reused = cache
+            .ensure_hub_sha256_with("owner/repo", revision, file, &expected_sha256, true, |_| {
+                panic!("offline verified custom path must not fetch")
+            })
+            .unwrap();
+        assert!(reused.cache_hit);
+        assert_eq!(fs::read(reused.path).unwrap(), contents);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_hub_mock_accepts_normal_relative_snapshot_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let cache = ModelCache::new(temp.path().join("openjev"));
+        let contents = b"custom Hub symlink bytes";
+        let expected_sha256 = digest_hex(&Sha256::digest(contents));
+        let revision = "0123456789abcdef0123456789abcdef01234567";
+        let snapshot = cache.custom_hub_path("owner/repo", revision, "custom.gguf");
+
+        let artifact = cache
+            .ensure_hub_sha256_with(
+                "owner/repo",
+                revision,
+                "custom.gguf",
+                &expected_sha256,
+                false,
+                |hub_root| {
+                    let blob = hub_root
+                        .join("models--owner--repo/blobs")
+                        .join(&expected_sha256);
+                    fs::write(&blob, contents).unwrap();
+                    symlink(Path::new("../../blobs").join(&expected_sha256), &snapshot).unwrap();
+                    Ok(snapshot.clone())
+                },
+            )
+            .unwrap();
+
+        assert!(!artifact.cache_hit);
+        assert_eq!(fs::read(artifact.path).unwrap(), contents);
+        assert!(
+            fs::symlink_metadata(snapshot)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_hub_online_rejects_hub_escape_before_downloader() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("openjev");
+        let outside = temp.path().join("outside-hub");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join("hub")).unwrap();
+        let cache = ModelCache::new(root);
+        let downloads = AtomicUsize::new(0);
+        let expected_sha256 = digest_hex(&Sha256::digest(b"expected"));
+
+        let error = cache
+            .ensure_hub_sha256_with(
+                "owner/repo",
+                "0123456789abcdef0123456789abcdef01234567",
+                "nested/custom.gguf",
+                &expected_sha256,
+                false,
+                |_| {
+                    downloads.fetch_add(1, Ordering::SeqCst);
+                    unreachable!("escaping Hub cache must fail before downloader")
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, BackendError::CacheSafety { .. }));
+        assert_eq!(downloads.load(Ordering::SeqCst), 0);
+        assert!(fs::read_dir(outside).unwrap().next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_hub_rejects_existing_lock_repo_blob_and_negative_parent_escapes() {
+        use std::os::unix::fs::symlink;
+
+        for escaped_parent in ["locks", "repository", "blobs", "no_exist"] {
+            let temp = TempDir::new().unwrap();
+            let cache = ModelCache::new(temp.path().join("openjev"));
+            let hub = cache.hub_root();
+            let repository = hub.join("models--owner--repo");
+            let outside = temp.path().join(format!("outside-{escaped_parent}"));
+            fs::create_dir_all(&outside).unwrap();
+            let link = match escaped_parent {
+                "locks" => hub.join(".locks/models--owner--repo"),
+                "repository" => repository.clone(),
+                "blobs" => repository.join("blobs"),
+                "no_exist" => repository.join(".no_exist/0123456789abcdef0123456789abcdef01234567"),
+                _ => unreachable!(),
+            };
+            fs::create_dir_all(link.parent().unwrap()).unwrap();
+            symlink(&outside, link).unwrap();
+            let downloads = AtomicUsize::new(0);
+            let expected_sha256 = digest_hex(&Sha256::digest(b"expected"));
+
+            let error = cache
+                .ensure_hub_sha256_with(
+                    "owner/repo",
+                    "0123456789abcdef0123456789abcdef01234567",
+                    "nested/custom.gguf",
+                    &expected_sha256,
+                    false,
+                    |_| {
+                        downloads.fetch_add(1, Ordering::SeqCst);
+                        unreachable!("escaping parent must fail before downloader")
+                    },
+                )
+                .unwrap_err();
+
+            assert!(
+                matches!(error, BackendError::CacheSafety { .. }),
+                "{escaped_parent}: {error}"
+            );
+            assert_eq!(downloads.load(Ordering::SeqCst), 0);
+            assert!(fs::read_dir(outside).unwrap().next().is_none());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_hub_offline_rejects_external_snapshot_target_without_fetch() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let cache = ModelCache::new(temp.path().join("openjev"));
+        let contents = b"external sentinel";
+        let expected_sha256 = digest_hex(&Sha256::digest(contents));
+        let revision = "0123456789abcdef0123456789abcdef01234567";
+        let snapshot = cache.custom_hub_path("owner/repo", revision, "custom.gguf");
+        let outside = temp.path().join("outside.gguf");
+        fs::write(&outside, contents).unwrap();
+        fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+        symlink(&outside, &snapshot).unwrap();
+        let downloads = AtomicUsize::new(0);
+
+        let error = cache
+            .ensure_hub_sha256_with(
+                "owner/repo",
+                revision,
+                "custom.gguf",
+                &expected_sha256,
+                true,
+                |_| {
+                    downloads.fetch_add(1, Ordering::SeqCst);
+                    unreachable!("offline external snapshot must not fetch")
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, BackendError::CacheSafety { .. }));
+        assert_eq!(downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(fs::read(outside).unwrap(), contents);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_hub_rejects_nested_snapshot_parent_escape_before_downloader() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let cache = ModelCache::new(temp.path().join("openjev"));
+        let revision = "0123456789abcdef0123456789abcdef01234567";
+        let repository = cache.hub_root().join("models--owner--repo");
+        let outside = temp.path().join("outside-snapshot-parent");
+        fs::create_dir_all(repository.join("snapshots")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, repository.join("snapshots").join(revision)).unwrap();
+        let downloads = AtomicUsize::new(0);
+        let expected_sha256 = digest_hex(&Sha256::digest(b"expected"));
+
+        let error = cache
+            .ensure_hub_sha256_with(
+                "owner/repo",
+                revision,
+                "nested/custom.gguf",
+                &expected_sha256,
+                false,
+                |_| {
+                    downloads.fetch_add(1, Ordering::SeqCst);
+                    unreachable!("nested parent escape must fail before downloader")
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, BackendError::CacheSafety { .. }));
+        assert_eq!(downloads.load(Ordering::SeqCst), 0);
+        assert!(fs::read_dir(outside).unwrap().next().is_none());
     }
 
     #[cfg(unix)]

@@ -16,8 +16,7 @@ resolved there; runtime gates remain unrun. Published llama crates are 0.1.156
 also corrects the brief's empty-option validation assumption, prediction-file
 cardinality (252; select authored144 by ID), build override assumptions, and
 chat-template API limitations. [`docs/PROGRESS.md`](docs/PROGRESS.md) records
-actual evidence. M1 is implemented, independently gated, and approved by
-parent/Astra after fixing separate-review findings. M2 and its targeted cache remediation are implemented; all three exact GGUFs loaded/scored on Metal and true CPU. Parent/Astra adjudicated Qwen3's nonidentical templates as equivalent only for the restricted disabled-thinking profile; final parent/Astra targeted code/evidence verification passed with 76 workspace tests; M2 is approved for commit. **The full original brief below is preserved**, not rewritten as if later runtime validation had occurred.
+actual evidence. M1 and M2 are approved. M3 is committed and approved at HEAD `e5fb968`: strict authored144 plus perturbations108 prompt/token/slot gates pass, and production `score_direct` returns a full validated Readout. M4 is implemented locally; targeted cache/streaming/help remediation passes and awaits parent/Astra recheck before commit. It exposes production CLI/library execution without adding M5 shared/batch algorithms. **The full original brief below is preserved**, not rewritten as if later runtime validation had occurred.
 
 ---
 
@@ -320,7 +319,7 @@ Section 8 outcomes: architecture loading succeeded for all three (`qwen3`, `llam
 
 The sentence above records M2's boundary at its commit. M3 has since been implemented locally as described below; no M4+ claim is implied.
 
-### M3 implementation status (numerical baseline accepted; targeted metadata re-review pending)
+### M3 implementation status (reviewed and approved)
 
 - [x] Added production owner-thread `EngineHandle::score_direct` returning the full validated core `Readout`, with one clean prefill per decision, chunk-local final-logit retrieval, f64 postprocessing, no per-row warmup, no generation, no fallback, and mode-accurate timings/metadata. Direct readout `cache_hit` is now always `false` because every call creates a fresh context/full prefill; download-cache status remains separate cache/runner metadata. A model-free unit regression covers repeated direct metadata for a cached artifact, and the M3 runner now rejects any direct row that does not report `false`.
 - [x] Reran offline fmt/check, workspace clippy/tests (78 passed), default-member clippy/tests (54 passed), and existing Metal/true-CPU native clippy/tests (26 unit tests each); diff check and unchanged-reference check passed. No model was resolved or benchmark rerun.
@@ -334,6 +333,19 @@ The sentence above records M2's boundary at its commit. M3 has since been implem
 - [x] Parent/Astra approved corrected inference `cache_hit=false` semantics and final checks (78 workspace tests) for the M3 commit. The original 252 create-only rows stay unchanged, with their historical `cache_hit=true` defect explicitly annotated; their raw numerical fields remain the accepted baseline.
 
 Section 8 status after M3: architecture support, restricted templates, serialization, accelerator truth, and licensing decisions remain closed with runtime evidence. The safe-wrapper layer-count gap is explicitly nullable/statused rather than guessed. Shared/hybrid copy correctness is intentionally still an M5 runtime gate, not a hidden M3 question; CUDA remains build-instruction scope until its later device gate. There are no other unresolved M3 design questions.
+
+### M4 implementation status (targeted remediation complete; recheck pending)
+
+- [x] Production `decide`, `noul`, `score`, `ask`, `run`, and `models list|pull|path` execution, with thin primitive adapters over owner-thread direct scoring.
+- [x] Exact text/file/stdin versus explicit structured-state ingestion; no trimming/guessing; explicit state never reads stdin; TTY absence errors.
+- [x] Complete pre-load validation, duplicate-ID rejection, exact serialized shared-state comparison, ordered JSONL continuation on runtime row failures, stable exit 0/1/2 behavior, and create-only output summaries. Run rows are written and flushed before the next inference; sink failure stops later scoring and still shuts down. Output files are reserved before model startup, with documented empty/partial-file failure policy and no premature summary.
+- [x] Visible serial full-prompt fallback for M4 shared/batch requests, including requested/effective modes, fallback reason and warning even under `--quiet`; `--require-shared` fails rather than pretending M5 exists.
+- [x] Noul `p_yes`, finite Score level values/expectation/argmax, opt-in labelled normalized-margin confidence, and explicit rejection of unavailable M7 transforms.
+- [x] Honest registered/custom model identity. Local files are hashed in place and may be `local-unverified`; custom Hub commits require caller SHA-256; all custom artifacts require an explicit profile and report `override-unverified` with no native-reference claim. Registered/custom Hub downloads share canonical mutation-parent preflight, and postfetch custom paths must remain owned regular files.
+- [x] JSON-only help/version/results/model-path/write-summary envelopes, clap-tree-derived nested help metadata, command schema export, stderr-only native/progress/error logs, clean broken-pipe behavior, process tests, deterministic test-only scoring injection, and opt-in cached Qwen native CLI tests.
+- [x] Parent/Astra code/evidence gate approved after targeted remediation; 97 workspace tests passed, native process capture 4/4. Ready for M4 milestone commit.
+
+M4 intentionally does not implement KV prefix copy, independent sequence packing, probe eligibility, eval/bench, calibration, temperature scaling, or permutation averaging. Those remain M5–M7.
 
 ## 9. Later (v2+)
 

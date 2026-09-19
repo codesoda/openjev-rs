@@ -1,0 +1,214 @@
+{
+  "schema": "openjev-m4-cli-probes-v1",
+  "status": "passed",
+  "binary": "target-m2-metal/release/openjev",
+  "model": "qwen3-0.6b",
+  "offline": true,
+  "cache_root": "/Users/chrisraethke/.cache/openjev",
+  "cases": [
+    {
+      "name": "decide",
+      "exit": 0,
+      "stdout_bytes": 2712,
+      "stdout_rows": 1,
+      "stdout_sha256": "31486f3fde308fec6997a2e25062b1a8d7c1265f3b45786c6e7ed495302ffd3a",
+      "stderr_bytes": 24405,
+      "stderr_sha256": "db1d4733e1df0ea5f22b14706d3721f7c36681f2aed8f494e9f6cd896476e0f0",
+      "schemas": [
+        "openjev-readout-v1"
+      ],
+      "ids": [
+        "decision-1"
+      ],
+      "primitives": [
+        "choice"
+      ],
+      "requested_modes": [
+        "direct"
+      ],
+      "effective_modes": [
+        "direct"
+      ],
+      "cache_hits": [
+        false
+      ],
+      "all_stdout_json": true
+    },
+    {
+      "name": "noul-stdin",
+      "exit": 0,
+      "stdout_bytes": 2638,
+      "stdout_rows": 1,
+      "stdout_sha256": "2d1e765a8be86af7c4911ee453cadecb7f1796014fadcc7bec8ed3f116a80932",
+      "stderr_bytes": 24405,
+      "stderr_sha256": "9a4544ba8e3eeea4610ea9ffd65b769c6d0d559f15e15699ff680eafa7b313fa",
+      "schemas": [
+        "openjev-readout-v1"
+      ],
+      "ids": [
+        "decision-1"
+      ],
+      "primitives": [
+        "noul"
+      ],
+      "requested_modes": [
+        "direct"
+      ],
+      "effective_modes": [
+        "direct"
+      ],
+      "cache_hits": [
+        false
+      ],
+      "all_stdout_json": true
+    },
+    {
+      "name": "score-json",
+      "exit": 0,
+      "stdout_bytes": 2714,
+      "stdout_rows": 1,
+      "stdout_sha256": "cada4a1bfc56bd33279b33a6f64f7cf3d2ee2e5489383852443a6f64d4614a1f",
+      "stderr_bytes": 24405,
+      "stderr_sha256": "6926829bcb5e57a1bf5e8160e2115d06b380320b1e785451e4b08f855fde6b56",
+      "schemas": [
+        "openjev-readout-v1"
+      ],
+      "ids": [
+        "decision-1"
+      ],
+      "primitives": [
+        "score"
+      ],
+      "requested_modes": [
+        "direct"
+      ],
+      "effective_modes": [
+        "direct"
+      ],
+      "cache_hits": [
+        false
+      ],
+      "all_stdout_json": true
+    },
+    {
+      "name": "ask-stdin",
+      "exit": 0,
+      "stdout_bytes": 2600,
+      "stdout_rows": 1,
+      "stdout_sha256": "57b30bfd924f11b7d6844d324fa44b6c599e336368fa42b41a50af2b9db79a51",
+      "stderr_bytes": 24405,
+      "stderr_sha256": "a63b6a4a019049e03340a5fff4454abb94a22bb8e729be406b6c345507ac8e4d",
+      "schemas": [
+        "openjev-readout-v1"
+      ],
+      "ids": [
+        "ask-1"
+      ],
+      "primitives": [
+        "choice"
+      ],
+      "requested_modes": [
+        "direct"
+      ],
+      "effective_modes": [
+        "direct"
+      ],
+      "cache_hits": [
+        false
+      ],
+      "all_stdout_json": true
+    },
+    {
+      "name": "run-jsonl",
+      "exit": 0,
+      "stdout_bytes": 5205,
+      "stdout_rows": 2,
+      "stdout_sha256": "bcc0ae0ecd1fa6b5c90d7f31f2c64129b9fb7b2691712a2d46f474f92a61397f",
+      "stderr_bytes": 29372,
+      "stderr_sha256": "3ebaf9ee57519981fabe3e6463ba0e135d0d42ea78920285c24edd44c07978a0",
+      "schemas": [
+        "openjev-readout-v1",
+        "openjev-readout-v1"
+      ],
+      "ids": [
+        "run-1",
+        "run-2"
+      ],
+      "primitives": [
+        "choice",
+        "choice"
+      ],
+      "requested_modes": [
+        "direct",
+        "direct"
+      ],
+      "effective_modes": [
+        "direct",
+        "direct"
+      ],
+      "cache_hits": [
+        false,
+        false
+      ],
+      "all_stdout_json": true
+    },
+    {
+      "name": "multi-shared-fallback",
+      "exit": 0,
+      "stdout_bytes": 5386,
+      "stdout_rows": 2,
+      "stdout_sha256": "1e505395e9fbcbf3b1a374e3a5e87587537d02f3a6fb591066f15cac457ec198",
+      "stderr_bytes": 29491,
+      "stderr_sha256": "2228f1bc350ad27e18691fbc44dc8e7c8b0a839b71148207a2e6013457882cad",
+      "schemas": [
+        "openjev-readout-v1",
+        "openjev-readout-v1"
+      ],
+      "ids": [
+        "decision-1",
+        "decision-2"
+      ],
+      "primitives": [
+        "choice",
+        "choice"
+      ],
+      "requested_modes": [
+        "shared",
+        "shared"
+      ],
+      "effective_modes": [
+        "serial",
+        "serial"
+      ],
+      "cache_hits": [
+        false,
+        false
+      ],
+      "all_stdout_json": true,
+      "fallback_reasons": [
+        "shared execution is not implemented or probed until M5",
+        "shared execution is not implemented or probed until M5"
+      ],
+      "quiet_warning_present": true
+    },
+    {
+      "name": "require-shared",
+      "exit": 2,
+      "stdout_bytes": 0,
+      "stdout_rows": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 161,
+      "stderr_sha256": "0f77a423221a0fc74a1df60fb85b41ad9a198e12a54277fdd5ecec480b2e104d",
+      "error_schema": "openjev-error-v1",
+      "error_code": "unsupported"
+    }
+  ],
+  "assertions": {
+    "all_expected_exits": true,
+    "all_success_stdout_lines_parse_as_json": true,
+    "no_downloads_requested": true,
+    "multi_requested_shared_effective_serial": true,
+    "quiet_did_not_suppress_fallback_warning": true,
+    "require_shared_failed_before_native_load": true
+  }
+}

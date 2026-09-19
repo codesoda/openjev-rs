@@ -1,28 +1,130 @@
 pub mod args;
+pub mod commands;
+pub mod input;
+pub mod output;
 
-use std::{ffi::OsString, io::Write};
+use std::{
+    ffi::OsString,
+    io::{Cursor, Read, Write},
+};
 
 use clap::{CommandFactory, Parser, error::ErrorKind};
-use openjev_core::ErrorRecord;
-use serde::Serialize;
+use openjev_core::{Decision, ErrorRecord, ExecutionMode};
+#[cfg(test)]
+use serde_json::Value;
 
-use crate::args::Cli;
+use crate::{
+    args::{Cli, Command, ModelsCommand},
+    commands::{Adapter, DecisionScorer},
+    output::{HelpOutput, VersionOutput, WriteSummary},
+};
 
-#[derive(Serialize)]
-struct HelpOutput {
-    schema: &'static str,
-    command: &'static str,
-    usage: String,
-    text: String,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ErrorClass {
+    Validation,
+    Runtime,
 }
 
-#[derive(Serialize)]
-struct VersionOutput {
-    schema: &'static str,
-    version: &'static str,
-    build: &'static str,
+#[derive(Debug)]
+pub struct CliError {
+    code: String,
+    message: String,
+    class: ErrorClass,
+    id: Option<String>,
+    unparsed: bool,
 }
 
+impl CliError {
+    pub fn validation(message: impl Into<String>) -> Self {
+        Self {
+            code: "validation".to_owned(),
+            message: message.into(),
+            class: ErrorClass::Validation,
+            id: None,
+            unparsed: false,
+        }
+    }
+
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self {
+            code: "unsupported".to_owned(),
+            message: message.into(),
+            class: ErrorClass::Validation,
+            id: None,
+            unparsed: false,
+        }
+    }
+
+    pub fn runtime(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            class: ErrorClass::Runtime,
+            id: None,
+            unparsed: false,
+        }
+    }
+
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    pub fn unparsed(mut self) -> Self {
+        self.unparsed = true;
+        self
+    }
+
+    pub fn from_core_validation(error: openjev_core::OpenJevError) -> Self {
+        Self::validation(error.to_string())
+    }
+
+    pub fn from_runtime_core(error: openjev_core::OpenJevError) -> Self {
+        Self::runtime(error.code(), error.to_string())
+    }
+
+    pub fn from_backend_validation(error: openjev_llama::BackendError) -> Self {
+        Self::validation(error.to_string())
+    }
+
+    pub fn from_backend_runtime(error: openjev_llama::BackendError) -> Self {
+        let code = match error {
+            openjev_llama::BackendError::Unavailable => "backend_unavailable",
+            openjev_llama::BackendError::OfflineMiss { .. } => "offline_miss",
+            openjev_llama::BackendError::Integrity { .. }
+            | openjev_llama::BackendError::CallerIntegrity { .. }
+            | openjev_llama::BackendError::ArtifactChanged { .. } => "artifact_integrity",
+            openjev_llama::BackendError::UnknownModel(_) => "unknown_model",
+            openjev_llama::BackendError::Configuration(_) => "invalid_configuration",
+            openjev_llama::BackendError::ModelLoad(_) => "model_load",
+            openjev_llama::BackendError::Decode(_) => "decode",
+            openjev_llama::BackendError::Worker(_) => "worker",
+            _ => "backend",
+        };
+        Self::runtime(code, error.to_string())
+    }
+
+    fn exit_code(&self) -> i32 {
+        match self.class {
+            ErrorClass::Validation => 2,
+            ErrorClass::Runtime => 1,
+        }
+    }
+
+    fn record(&self) -> ErrorRecord {
+        let mut record = ErrorRecord::new(self.code.clone(), self.message.clone());
+        record.id.clone_from(&self.id);
+        if self.unparsed {
+            record.parse_status = Some("unparsed".to_owned());
+        }
+        record
+    }
+}
+
+/// Compatibility entry point for callers that do not provide stdin.
+///
+/// stdin is treated as a TTY, so commands needing state/input fail rather than
+/// reading an implicit empty stream.
 pub fn run<I, T, W, E>(arguments: I, stdout: &mut W, stderr: &mut E) -> i32
 where
     I: IntoIterator<Item = T>,
@@ -30,76 +132,553 @@ where
     W: Write,
     E: Write,
 {
+    run_with_io(
+        arguments,
+        &mut Cursor::new(Vec::<u8>::new()),
+        true,
+        stdout,
+        stderr,
+    )
+}
+
+pub fn run_with_io<I, T, R, W, E>(
+    arguments: I,
+    stdin: &mut R,
+    stdin_is_terminal: bool,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> i32
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+    R: Read,
+    W: Write,
+    E: Write,
+{
+    let arguments: Vec<OsString> = arguments.into_iter().map(Into::into).collect();
     match Cli::try_parse_from(arguments) {
-        Ok(_cli) => {
-            let error = ErrorRecord::new(
-                "backend_unavailable",
-                "M1 provides parser and schema surfaces only; production inference starts in M2",
-            );
-            if write_json(stderr, &error, false).is_err() {
-                return 1;
-            }
-            1
-        }
+        Ok(cli) => match execute(cli, stdin, stdin_is_terminal, stdout, stderr) {
+            Ok(code) => code,
+            Err(error) => emit_error(stderr, &error, false),
+        },
         Err(error) if error.kind() == ErrorKind::DisplayHelp => {
-            let mut command = Cli::command();
-            let usage = command.render_usage().to_string();
             let text = error.to_string();
+            let (command, usage) = help_metadata(&text);
             let output = HelpOutput {
                 schema: "openjev-help-v1",
-                command: "openjev",
+                command,
                 usage,
                 text,
             };
-            i32::from(write_json(stdout, &output, false).is_err())
+            i32::from(output::write_json(stdout, &output, false).is_err())
         }
         Err(error) if error.kind() == ErrorKind::DisplayVersion => {
             let output = VersionOutput {
                 schema: "openjev-version-v1",
                 version: env!("CARGO_PKG_VERSION"),
-                build: "backend-disabled-m1",
+                build: build_identity(),
             };
-            i32::from(write_json(stdout, &output, false).is_err())
+            i32::from(output::write_json(stdout, &output, false).is_err())
         }
         Err(error) => {
-            let output = ErrorRecord::new("usage", error.to_string());
-            if write_json(stderr, &output, false).is_err() {
-                return 2;
-            }
-            2
+            let output = CliError {
+                code: "usage".to_owned(),
+                message: error.to_string(),
+                class: ErrorClass::Validation,
+                id: None,
+                unparsed: false,
+            };
+            emit_error(stderr, &output, false)
         }
     }
 }
 
-fn write_json<W: Write, T: Serialize>(
-    writer: &mut W,
-    value: &T,
-    pretty: bool,
-) -> std::io::Result<()> {
-    let result = if pretty {
-        serde_json::to_writer_pretty(&mut *writer, value)
+fn execute<R: Read, W: Write, E: Write>(
+    cli: Cli,
+    stdin: &mut R,
+    stdin_is_terminal: bool,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<i32, CliError> {
+    let pretty = cli.global.pretty;
+    match cli.command {
+        Command::Decide(args) => {
+            let state = input::read_state(&args.state, stdin, stdin_is_terminal)?;
+            let items = commands::decide_items(args, state)?;
+            commands::validate_unique_ids(&items)?;
+            let requested_mode = commands::mode_for_decide(items.len());
+            reject_pretty_multi(pretty, items.len())?;
+            commands::check_require_shared(&cli.global, requested_mode)?;
+            let config = commands::scoring_config(&cli.global)?;
+            warn_fallback(stderr, requested_mode)?;
+            let group_id =
+                (items.len() > 1).then(|| format!("openjev-group-{}", std::process::id()));
+            let rows = score_all(&config, &items, requested_mode, group_id.as_deref())?;
+            write_rows(stdout, &rows, pretty)?;
+            Ok(0)
+        }
+        Command::Noul(args) => {
+            let state = input::read_state(&args.state, stdin, stdin_is_terminal)?;
+            let item = commands::noul_item(args, state)?;
+            commands::check_require_shared(&cli.global, ExecutionMode::Direct)?;
+            let config = commands::scoring_config(&cli.global)?;
+            let rows = score_all(&config, &[item], ExecutionMode::Direct, None)?;
+            write_rows(stdout, &rows, pretty)?;
+            Ok(0)
+        }
+        Command::Score(args) => {
+            let state = input::read_state(&args.state, stdin, stdin_is_terminal)?;
+            let item = commands::score_item(args, state)?;
+            commands::check_require_shared(&cli.global, ExecutionMode::Direct)?;
+            let config = commands::scoring_config(&cli.global)?;
+            let rows = score_all(&config, &[item], ExecutionMode::Direct, None)?;
+            write_rows(stdout, &rows, pretty)?;
+            Ok(0)
+        }
+        Command::Ask(args) => {
+            let decision = input::read_decision(
+                args.json.as_deref(),
+                args.input.as_deref(),
+                stdin,
+                stdin_is_terminal,
+            )?;
+            let item = Adapter::Choice(decision);
+            commands::check_require_shared(&cli.global, ExecutionMode::Direct)?;
+            let config = commands::scoring_config(&cli.global)?;
+            let rows = score_all(&config, &[item], ExecutionMode::Direct, None)?;
+            write_rows(stdout, &rows, pretty)?;
+            Ok(0)
+        }
+        Command::Run(args) => {
+            if pretty {
+                return Err(CliError::validation(
+                    "--pretty is not valid for run JSONL output",
+                ));
+            }
+            let rows = input::read_jsonl(args.input.as_deref(), stdin, stdin_is_terminal)?;
+            validate_run_ids(&rows)?;
+            let requested_mode = commands::mode_from_arg(args.mode);
+            if requested_mode == ExecutionMode::Shared {
+                commands::validate_shared_states(&rows)?;
+            }
+            commands::check_require_shared(&cli.global, requested_mode)?;
+            if let Some(path) = &args.output {
+                commands::preflight_output(path, args.input.as_deref())?;
+            }
+            let config = commands::scoring_config(&cli.global)?;
+            warn_fallback(stderr, requested_mode)?;
+            execute_run(
+                &config,
+                rows,
+                requested_mode,
+                args.output.as_deref(),
+                stdout,
+                stderr,
+            )
+        }
+        Command::Models(args) => match args.command.unwrap_or(ModelsCommand::List) {
+            ModelsCommand::List => {
+                let output = commands::models_list(&cli.global)?;
+                output::write_json(stdout, &output, pretty)
+                    .map_err(|error| CliError::runtime("output_io", error.to_string()))?;
+                Ok(0)
+            }
+            ModelsCommand::Pull { id, repair } => {
+                let output = models_resolve(&cli.global, &id, true, repair)?;
+                output::write_json(stdout, &output, pretty)
+                    .map_err(|error| CliError::runtime("output_io", error.to_string()))?;
+                Ok(0)
+            }
+            ModelsCommand::Path { id } => {
+                let output = models_resolve(&cli.global, &id, false, false)?;
+                output::write_json(stdout, &output, pretty)
+                    .map_err(|error| CliError::runtime("output_io", error.to_string()))?;
+                Ok(0)
+            }
+            ModelsCommand::Probe { .. } => {
+                if cli.global.model.is_some() {
+                    return Err(CliError::validation(
+                        "use the models probe positional ID instead of global --model",
+                    ));
+                }
+                commands::reject_unimplemented_postprocessing(&cli.global)?;
+                Err(CliError::runtime(
+                    "not_implemented",
+                    "models probe shared/batch is an M5 surface and is not implemented in M4",
+                ))
+            }
+        },
+        Command::Eval(_) => {
+            commands::reject_unimplemented_postprocessing(&cli.global)?;
+            Err(CliError::runtime(
+                "not_implemented",
+                "eval is an M6 surface and is not implemented in M4",
+            ))
+        }
+        Command::Bench(_) => {
+            commands::reject_unimplemented_postprocessing(&cli.global)?;
+            Err(CliError::runtime(
+                "not_implemented",
+                "bench is an M6 surface and is not implemented in M4",
+            ))
+        }
+        Command::Calibrate(_) => {
+            commands::reject_unimplemented_postprocessing(&cli.global)?;
+            Err(CliError::runtime(
+                "not_implemented",
+                "calibrate is an M7 surface and is not implemented in M4",
+            ))
+        }
+    }
+}
+
+fn reject_pretty_multi(pretty: bool, count: usize) -> Result<(), CliError> {
+    if pretty && count != 1 {
+        Err(CliError::validation(
+            "--pretty is only valid for a single JSON object, not JSONL",
+        ))
     } else {
-        serde_json::to_writer(&mut *writer, value)
+        Ok(())
+    }
+}
+
+fn write_rows<W: Write>(
+    writer: &mut W,
+    rows: &[openjev_core::Readout],
+    pretty: bool,
+) -> Result<(), CliError> {
+    if rows.len() == 1 {
+        output::write_json(writer, &rows[0], pretty)
+    } else {
+        output::write_jsonl(writer, rows)
+    }
+    .map_err(|error| CliError::runtime("output_io", error.to_string()))
+}
+
+fn validate_run_ids(rows: &[Decision]) -> Result<(), CliError> {
+    let mut ids = std::collections::HashSet::with_capacity(rows.len());
+    for row in rows {
+        if !ids.insert(row.id.as_str()) {
+            return Err(CliError::validation(format!(
+                "duplicate decision ID {:?}",
+                row.id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn warn_fallback(writer: &mut impl Write, mode: ExecutionMode) -> Result<(), CliError> {
+    if let Some(reason) = commands::fallback_reason(mode) {
+        writeln!(
+            writer,
+            "warning: requested {mode:?}; using serial full-prompt fallback: {reason}"
+        )
+        .map_err(|error| CliError::runtime("stderr_io", error.to_string()))?;
+    }
+    Ok(())
+}
+
+fn execute_run<W: Write, E: Write>(
+    config: &commands::ScoringConfig,
+    decisions: Vec<Decision>,
+    requested_mode: ExecutionMode,
+    output_path: Option<&std::path::Path>,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<i32, CliError> {
+    let items: Vec<_> = decisions.into_iter().map(Adapter::Choice).collect();
+    // Input and output alias validation has already completed. Reserve the
+    // create-only destination before model resolution/scoring so a racing
+    // creator cannot cause inference whose rows have nowhere safe to go. If
+    // later model startup fails, this deliberately leaves an empty file.
+    let mut output_file = output_path.map(output::create_jsonl_new).transpose()?;
+    let mut scorer = load_scorer(config)?;
+    let group_id = matches!(requested_mode, ExecutionMode::Shared | ExecutionMode::Batch)
+        .then(|| format!("openjev-group-{}", std::process::id()));
+    let outcome = if let Some(file) = output_file.as_mut() {
+        stream_run_and_shutdown(
+            scorer.as_mut(),
+            &items,
+            requested_mode,
+            config.confidence,
+            group_id.as_deref(),
+            file,
+            stderr,
+        )?
+    } else {
+        stream_run_and_shutdown(
+            scorer.as_mut(),
+            &items,
+            requested_mode,
+            config.confidence,
+            group_id.as_deref(),
+            stdout,
+            stderr,
+        )?
     };
-    result.map_err(std::io::Error::other)?;
-    writer.write_all(b"\n")
+
+    if let (Some(path), Some(file)) = (output_path, output_file.as_ref()) {
+        output::sync_jsonl(file, path)?;
+        let summary = WriteSummary {
+            schema: "openjev-write-summary-v1",
+            path: path.display().to_string(),
+            written: outcome.written,
+            failed: outcome.failed,
+        };
+        output::write_json(stdout, &summary, false)
+            .map_err(|error| CliError::runtime("output_io", error.to_string()))?;
+    }
+    Ok(i32::from(outcome.failed > 0))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RunOutcome {
+    written: usize,
+    failed: usize,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stream_run_and_shutdown<W: Write + ?Sized, E: Write + ?Sized>(
+    scorer: &mut dyn DecisionScorer,
+    items: &[Adapter],
+    requested_mode: ExecutionMode,
+    confidence: bool,
+    group_id: Option<&str>,
+    writer: &mut W,
+    stderr: &mut E,
+) -> Result<RunOutcome, CliError> {
+    let streamed = stream_run_rows(
+        scorer,
+        items,
+        requested_mode,
+        confidence,
+        group_id,
+        writer,
+        stderr,
+    );
+    let shutdown = scorer.shutdown();
+    match (streamed, shutdown) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(outcome), Ok(())) => Ok(outcome),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stream_run_rows<W: Write + ?Sized, E: Write + ?Sized>(
+    scorer: &mut dyn DecisionScorer,
+    items: &[Adapter],
+    requested_mode: ExecutionMode,
+    confidence: bool,
+    group_id: Option<&str>,
+    writer: &mut W,
+    stderr: &mut E,
+) -> Result<RunOutcome, CliError> {
+    let mut outcome = RunOutcome {
+        written: 0,
+        failed: 0,
+    };
+    for item in items {
+        match commands::score_item_with(scorer, item, requested_mode, confidence, group_id) {
+            Ok(row) => write_run_row(writer, &row)?,
+            Err(error) => {
+                outcome.failed += 1;
+                let error = error.with_id(item.decision().id.clone());
+                write_run_row(writer, &error.record())?;
+                writeln!(
+                    stderr,
+                    "row {:?} failed: {}",
+                    item.decision().id,
+                    error.message
+                )
+                .map_err(|write_error| CliError::runtime("stderr_io", write_error.to_string()))?;
+            }
+        }
+        outcome.written += 1;
+    }
+    Ok(outcome)
+}
+
+fn write_run_row<W: Write + ?Sized, T: serde::Serialize>(
+    writer: &mut W,
+    row: &T,
+) -> Result<(), CliError> {
+    output::write_json(writer, row, false)
+        .and_then(|()| writer.flush())
+        .map_err(|error| CliError::runtime("output_io", error.to_string()))
+}
+
+fn score_all(
+    config: &commands::ScoringConfig,
+    items: &[Adapter],
+    requested_mode: ExecutionMode,
+    group_id: Option<&str>,
+) -> Result<Vec<openjev_core::Readout>, CliError> {
+    let mut scorer = load_scorer(config)?;
+    let result = items
+        .iter()
+        .map(|item| {
+            commands::score_item_with(
+                scorer.as_mut(),
+                item,
+                requested_mode,
+                config.confidence,
+                group_id,
+            )
+        })
+        .collect();
+    let shutdown = scorer.shutdown();
+    match (result, shutdown) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(rows), Ok(())) => Ok(rows),
+    }
+}
+
+#[cfg(feature = "native")]
+fn load_scorer(config: &commands::ScoringConfig) -> Result<Box<dyn DecisionScorer>, CliError> {
+    commands::NativeScorer::load(config).map(|scorer| Box::new(scorer) as Box<dyn DecisionScorer>)
+}
+
+#[cfg(not(feature = "native"))]
+fn load_scorer(_config: &commands::ScoringConfig) -> Result<Box<dyn DecisionScorer>, CliError> {
+    Err(CliError::runtime(
+        "backend_unavailable",
+        "production scoring requires building openjev-cli with native, metal, or cuda",
+    ))
+}
+
+#[cfg(feature = "native")]
+fn models_resolve(
+    global: &args::GlobalArgs,
+    id: &str,
+    pull: bool,
+    repair: bool,
+) -> Result<commands::ModelPathOutput, CliError> {
+    commands::models_resolve(global, id, pull, repair)
+}
+
+#[cfg(not(feature = "native"))]
+fn models_resolve(
+    global: &args::GlobalArgs,
+    id: &str,
+    pull: bool,
+    _repair: bool,
+) -> Result<commands::ModelPathOutput, CliError> {
+    commands::reject_models_irrelevant(global, if pull { "pull" } else { "path" })?;
+    if global.model.is_some() {
+        return Err(CliError::validation(
+            "use the models pull/path positional ID instead of global --model",
+        ));
+    }
+    if pull {
+        return Err(CliError::runtime(
+            "backend_unavailable",
+            "models pull requires building openjev-cli with native, metal, or cuda",
+        ));
+    }
+    if global.model_sha256.is_some() || global.template_profile.is_some() {
+        return Err(CliError::runtime(
+            "backend_unavailable",
+            "custom model path verification requires a native CLI build",
+        ));
+    }
+    let registry =
+        openjev_llama::ModelRegistry::bundled().map_err(CliError::from_backend_runtime)?;
+    let cache = openjev_llama::ModelCache::from_precedence(global.cache_dir.as_deref())
+        .map_err(CliError::from_backend_runtime)?;
+    let entry = registry
+        .resolve(id)
+        .map_err(CliError::from_backend_runtime)?;
+    let artifact = registry
+        .path(&cache, id)
+        .map_err(CliError::from_backend_runtime)?;
+    Ok(commands::ModelPathOutput {
+        schema: "openjev-model-path-v1",
+        id: entry.id.clone(),
+        path: artifact.path.display().to_string(),
+        bytes: artifact.bytes,
+        sha256: artifact.sha256,
+        integrity: "manifest-sha256".to_owned(),
+        cache_hit: artifact.cache_hit,
+    })
+}
+
+fn emit_error(writer: &mut impl Write, error: &CliError, pretty: bool) -> i32 {
+    let code = error.exit_code();
+    if output::write_json(writer, &error.record(), pretty).is_err() {
+        return if code == 0 { 1 } else { code };
+    }
+    code
+}
+
+fn help_metadata(rendered_help: &str) -> (String, String) {
+    let mut root = Cli::command();
+    root.build();
+    find_help_metadata(&mut root, rendered_help).unwrap_or_else(|| {
+        let name = root
+            .get_bin_name()
+            .unwrap_or_else(|| root.get_name())
+            .to_owned();
+        let usage = root.render_usage().to_string();
+        (name, usage)
+    })
+}
+
+fn find_help_metadata(
+    command: &mut clap::Command,
+    rendered_help: &str,
+) -> Option<(String, String)> {
+    let short = command.clone().render_help().to_string();
+    let long = command.clone().render_long_help().to_string();
+    if rendered_help == short || rendered_help == long {
+        let name = command
+            .get_bin_name()
+            .unwrap_or_else(|| command.get_name())
+            .to_owned();
+        let usage = command.clone().render_usage().to_string();
+        return Some((name, usage));
+    }
+    for subcommand in command.get_subcommands_mut() {
+        if let Some(metadata) = find_help_metadata(subcommand, rendered_help) {
+            return Some(metadata);
+        }
+    }
+    None
+}
+
+const fn build_identity() -> &'static str {
+    if cfg!(feature = "cuda") {
+        "m4-native-cuda"
+    } else if cfg!(feature = "metal") {
+        "m4-native-metal"
+    } else if cfg!(feature = "native") {
+        "m4-native-cpu"
+    } else {
+        "m4-backend-disabled"
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use openjev_core::{DecisionOption, StateValue};
+
     use super::*;
 
-    fn invoke(arguments: &[&str]) -> (i32, serde_json::Value, serde_json::Value) {
+    fn invoke(arguments: &[&str]) -> (i32, Value, Value) {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let code = run(arguments, &mut stdout, &mut stderr);
         let stdout = if stdout.is_empty() {
-            serde_json::Value::Null
+            Value::Null
         } else {
             serde_json::from_slice(&stdout).unwrap()
         };
         let stderr = if stderr.is_empty() {
-            serde_json::Value::Null
+            Value::Null
         } else {
             serde_json::from_slice(&stderr).unwrap()
         };
@@ -107,10 +686,11 @@ mod tests {
     }
 
     #[test]
-    fn help_and_version_are_json_only() {
+    fn help_and_version_are_json_only_and_include_piped_examples() {
         let (code, stdout, stderr) = invoke(&["openjev", "--help"]);
         assert_eq!(code, 0);
         assert_eq!(stdout["schema"], "openjev-help-v1");
+        assert!(stdout["text"].as_str().unwrap().contains("printf"));
         assert!(stderr.is_null());
 
         let (code, stdout, stderr) = invoke(&["openjev", "--version"]);
@@ -119,10 +699,65 @@ mod tests {
         assert!(stderr.is_null());
     }
 
+    #[cfg(not(feature = "native"))]
     #[test]
-    fn scoring_never_returns_fake_inference() {
+    fn explicit_state_is_validated_without_reading_stdin() {
+        struct PanicRead;
+        impl Read for PanicRead {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                panic!("explicit state must not read stdin")
+            }
+        }
+        let mut stdin = PanicRead;
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_with_io(
+            [
+                "openjev",
+                "decide",
+                "--question",
+                "q",
+                "--option",
+                "a",
+                "--option",
+                "b",
+                "--state",
+                " exact ",
+            ],
+            &mut stdin,
+            false,
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_eq!(code, 1);
+        assert!(stdout.is_empty());
+        let error: Value = serde_json::from_slice(&stderr).unwrap();
+        assert_eq!(error["error"]["code"], "backend_unavailable");
+    }
+
+    #[test]
+    fn tty_without_state_is_validation_error_before_backend() {
         let (code, stdout, stderr) = invoke(&[
             "openjev",
+            "decide",
+            "--question",
+            "q",
+            "--option",
+            "a",
+            "--option",
+            "b",
+        ]);
+        assert_eq!(code, 2);
+        assert!(stdout.is_null());
+        assert_eq!(stderr["error"]["code"], "validation");
+    }
+
+    #[test]
+    fn unsupported_m5_and_m7_options_fail_before_backend() {
+        let (code, _, stderr) = invoke(&[
+            "openjev",
+            "--permute",
+            "2",
             "decide",
             "--question",
             "q",
@@ -133,53 +768,214 @@ mod tests {
             "--state",
             "s",
         ]);
-        assert_eq!(code, 1);
-        assert!(stdout.is_null());
-        assert_eq!(stderr["error"]["code"], "backend_unavailable");
-    }
-
-    #[test]
-    fn usage_errors_are_json_on_stderr() {
-        let (code, stdout, stderr) = invoke(&["openjev", "unknown"]);
         assert_eq!(code, 2);
-        assert!(stdout.is_null());
-        assert_eq!(stderr["schema"], "openjev-error-v1");
+        assert_eq!(stderr["error"]["code"], "unsupported");
+
+        let (code, _, stderr) = invoke(&[
+            "openjev",
+            "--require-shared",
+            "decide",
+            "--question",
+            "q1",
+            "--question",
+            "q2",
+            "--option",
+            "a",
+            "--option",
+            "b",
+            "--state",
+            "s",
+        ]);
+        assert_eq!(code, 2);
+        assert_eq!(stderr["error"]["code"], "unsupported");
     }
 
     #[test]
-    fn parses_each_command_surface() {
-        for arguments in [
-            vec!["openjev", "noul", "--question", "q", "--state", "s"],
-            vec![
-                "openjev",
-                "score",
-                "--question",
-                "q",
-                "--level",
-                "low",
-                "--level",
-                "high",
-                "--state-json",
-                "[1]",
-            ],
-            vec!["openjev", "ask", "--json", "{}"],
-            vec!["openjev", "run", "--mode", "batch"],
-            vec![
-                "openjev",
-                "models",
-                "probe",
-                "qwen3-0.6b",
-                "--mode",
-                "shared",
-            ],
-            vec!["openjev", "eval", "--fixture", "authored144"],
-            vec!["openjev", "bench", "--state-file", "s", "--questions", "q"],
-            vec!["openjev", "calibrate", "--input", "rows.jsonl"],
-        ] {
-            let (code, stdout, stderr) = invoke(&arguments);
-            assert_eq!(code, 1, "{arguments:?}");
-            assert!(stdout.is_null());
-            assert_eq!(stderr["error"]["code"], "backend_unavailable");
+    fn parse_failure_precedes_backend_loading() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut stdin = Cursor::new(b"{bad}\n".to_vec());
+        let code = run_with_io(
+            ["openjev", "run"],
+            &mut stdin,
+            false,
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        let error: Value = serde_json::from_slice(&stderr).unwrap();
+        assert_eq!(error["parse_status"], "unparsed");
+    }
+
+    #[derive(Default)]
+    struct StreamProbeState {
+        bytes: Vec<u8>,
+        flushes: usize,
+        calls: usize,
+        shutdowns: usize,
+        fail_output: bool,
+    }
+
+    struct ProbeWriter {
+        state: Arc<Mutex<StreamProbeState>>,
+    }
+
+    impl Write for ProbeWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            let mut state = self.state.lock().unwrap();
+            if state.fail_output {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "injected output failure",
+                ));
+            }
+            state.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
         }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            let mut state = self.state.lock().unwrap();
+            if state.fail_output {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "injected output failure",
+                ));
+            }
+            state.flushes += 1;
+            Ok(())
+        }
+    }
+
+    struct ProbeScorer {
+        state: Arc<Mutex<StreamProbeState>>,
+        fail_output_on_call: Option<usize>,
+    }
+
+    impl DecisionScorer for ProbeScorer {
+        fn score_direct(&mut self, _decision: Decision) -> Result<openjev_core::Readout, CliError> {
+            let mut state = self.state.lock().unwrap();
+            state.calls += 1;
+            let call = state.calls;
+            if call > 1 {
+                assert_eq!(state.flushes, call - 1);
+                assert_eq!(
+                    state.bytes.iter().filter(|byte| **byte == b'\n').count(),
+                    call - 1
+                );
+            }
+            if self.fail_output_on_call == Some(call) {
+                state.fail_output = true;
+            }
+            drop(state);
+            Err(CliError::runtime(
+                "injected_row_failure",
+                format!("injected failure {call}"),
+            ))
+        }
+
+        fn shutdown(&mut self) -> Result<(), CliError> {
+            self.state.lock().unwrap().shutdowns += 1;
+            Ok(())
+        }
+    }
+
+    fn run_items(count: usize) -> Vec<Adapter> {
+        (1..=count)
+            .map(|index| {
+                Adapter::Choice(
+                    Decision::new(
+                        format!("row-{index}"),
+                        StateValue::string("state").unwrap(),
+                        "question",
+                        vec![
+                            DecisionOption {
+                                id: "a".to_owned(),
+                                description: "A".to_owned(),
+                            },
+                            DecisionOption {
+                                id: "b".to_owned(),
+                                description: "B".to_owned(),
+                            },
+                        ],
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn run_stream_flushes_each_row_before_starting_the_next_score() {
+        let state = Arc::new(Mutex::new(StreamProbeState::default()));
+        let mut scorer = ProbeScorer {
+            state: Arc::clone(&state),
+            fail_output_on_call: None,
+        };
+        let mut writer = ProbeWriter {
+            state: Arc::clone(&state),
+        };
+        let mut stderr = Vec::new();
+
+        let outcome = stream_run_and_shutdown(
+            &mut scorer,
+            &run_items(2),
+            ExecutionMode::Direct,
+            false,
+            None,
+            &mut writer,
+            &mut stderr,
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            RunOutcome {
+                written: 2,
+                failed: 2
+            }
+        );
+        let state = state.lock().unwrap();
+        assert_eq!(state.calls, 2);
+        assert_eq!(state.flushes, 2);
+        assert_eq!(state.shutdowns, 1);
+        let rows: Vec<Value> = String::from_utf8(state.bytes.clone())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows[0]["id"], "row-1");
+        assert_eq!(rows[1]["id"], "row-2");
+    }
+
+    #[test]
+    fn run_output_failure_stops_later_scoring_and_still_shuts_down() {
+        let state = Arc::new(Mutex::new(StreamProbeState::default()));
+        let mut scorer = ProbeScorer {
+            state: Arc::clone(&state),
+            fail_output_on_call: Some(2),
+        };
+        let mut writer = ProbeWriter {
+            state: Arc::clone(&state),
+        };
+        let mut stderr = Vec::new();
+
+        let error = stream_run_and_shutdown(
+            &mut scorer,
+            &run_items(3),
+            ExecutionMode::Direct,
+            false,
+            None,
+            &mut writer,
+            &mut stderr,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, "output_io");
+        let state = state.lock().unwrap();
+        assert_eq!(state.calls, 2, "third row must not be scored");
+        assert_eq!(state.flushes, 1);
+        assert_eq!(state.shutdowns, 1);
+        assert_eq!(state.bytes.iter().filter(|byte| **byte == b'\n').count(), 1);
     }
 }

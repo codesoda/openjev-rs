@@ -19,14 +19,16 @@ use llama_cpp_2::{
 };
 use openjev_core::{
     DIRECT_READOUT, Decision, Device, ExecutionMetadata, ExecutionMode, GpuLayersRequested,
-    GpuLayersStatus, Integrity, ModelMetadata, NativeReference, NumericReadout, PROBABILITY_STATUS,
-    Primitive, PromptProfile, Readout, SlotTokenizer, TemplateMetadataStatus, prepare_prompt,
-    read_logits, standard_limitations, verify_slots,
+    GpuLayersStatus, ModelMetadata, NativeReference, NumericReadout, PROBABILITY_STATUS, Primitive,
+    PromptProfile, Readout, SlotTokenizer, TemplateMetadataStatus, prepare_prompt, read_logits,
+    standard_limitations, verify_slots,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::{BackendError, ModelEntry, Result, VerifiedArtifact, cache::hash_file};
+use crate::{
+    BackendError, ModelEntry, Result, RuntimeModelSpec, VerifiedArtifact, cache::hash_file,
+};
 
 const LLAMA_CPP_COMMIT: &str = "e79e4bf660e19f2ad851e06c6913f7a8c5852621";
 static RUN_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -125,6 +127,7 @@ pub struct RuntimeDevice {
 pub enum TemplateStatus {
     Exact,
     ReviewedEquivalent,
+    OverrideUnverified,
     Mismatch,
     Missing,
 }
@@ -139,7 +142,7 @@ pub struct LoadedModelInfo {
     pub model_bytes: u64,
     pub profile: PromptProfile,
     pub gguf_template_sha256: Option<String>,
-    pub expected_native_template_sha256: String,
+    pub expected_native_template_sha256: Option<String>,
     pub template_status: TemplateStatus,
     pub template_diagnostic: Option<String>,
     pub load_seconds: f64,
@@ -258,7 +261,25 @@ impl EngineHandle {
         artifact: VerifiedArtifact,
         options: EngineOptions,
     ) -> Result<Self> {
+        Self::spawn_resolved(model.into(), artifact, options)
+    }
+
+    pub fn spawn_resolved(
+        model: RuntimeModelSpec,
+        artifact: VerifiedArtifact,
+        options: EngineOptions,
+    ) -> Result<Self> {
         options.validate()?;
+        model.validate()?;
+        if artifact.model_id != model.id
+            || artifact.bytes != model.bytes
+            || artifact.sha256 != model.sha256
+        {
+            return Err(BackendError::Configuration(
+                "resolved artifact identity does not match the engine model specification"
+                    .to_owned(),
+            ));
+        }
         let (sender, receiver) = sync_channel(1);
         let (startup_sender, startup_receiver) = sync_channel(1);
         let join = std::thread::Builder::new()
@@ -342,11 +363,15 @@ impl EngineHandle {
 
     fn join_worker(&mut self) -> Result<()> {
         if let Some(join) = self.join.take() {
-            join.join()
-                .map_err(|_| BackendError::Worker("owner thread panicked".to_owned()))?;
+            join_owner_thread(join)?;
         }
         Ok(())
     }
+}
+
+fn join_owner_thread(join: JoinHandle<()>) -> Result<()> {
+    join.join()
+        .map_err(|_| BackendError::Worker("owner thread panicked".to_owned()))
 }
 
 impl Drop for EngineHandle {
@@ -357,7 +382,7 @@ impl Drop for EngineHandle {
 }
 
 fn worker_main(
-    spec: ModelEntry,
+    spec: RuntimeModelSpec,
     artifact: VerifiedArtifact,
     options: EngineOptions,
     receiver: Receiver<Request>,
@@ -397,7 +422,7 @@ fn worker_main(
 }
 
 fn initialize_worker(
-    spec: &ModelEntry,
+    spec: &RuntimeModelSpec,
     artifact: &VerifiedArtifact,
     options: &EngineOptions,
 ) -> Result<(LlamaBackend, LlamaModel, LoadedModelInfo)> {
@@ -442,7 +467,10 @@ fn initialize_worker(
     let gguf_template_sha256 = gguf_template
         .as_ref()
         .map(|template| digest_hex(&Sha256::digest(template.as_bytes())));
-    let expected = spec.native_reference.template_sha256.clone();
+    let expected = spec
+        .native_reference
+        .as_ref()
+        .map(|reference| reference.template_sha256.clone());
     let (template_status, template_diagnostic) =
         adjudicate_template(spec, &actual_sha256, gguf_template_sha256.as_deref());
     let vocabulary_size = u32::try_from(model.n_vocab()).map_err(|_| {
@@ -497,11 +525,29 @@ fn initialize_worker(
 }
 
 fn adjudicate_template(
-    spec: &ModelEntry,
+    spec: &RuntimeModelSpec,
     artifact_sha256: &str,
     gguf_template_sha256: Option<&str>,
 ) -> (TemplateStatus, Option<String>) {
-    let expected = &spec.native_reference.template_sha256;
+    if spec.template_override {
+        return (
+            TemplateStatus::OverrideUnverified,
+            Some(
+                "explicit template-profile override for a custom artifact; no registered golden or native-template equivalence is claimed"
+                    .to_owned(),
+            ),
+        );
+    }
+    let Some(expected) = spec
+        .native_reference
+        .as_ref()
+        .map(|reference| &reference.template_sha256)
+    else {
+        return (
+            TemplateStatus::Mismatch,
+            Some("registered model is missing its native template identity".to_owned()),
+        );
+    };
     match gguf_template_sha256 {
         Some(actual) if actual == expected => (TemplateStatus::Exact, None),
         Some(actual)
@@ -540,7 +586,7 @@ fn adjudicate_template(
 
 fn encode_direct_prompt(
     model: &LlamaModel,
-    spec: &ModelEntry,
+    spec: &RuntimeModelSpec,
     info: &LoadedModelInfo,
     decision: &Decision,
 ) -> Result<EncodedPrompt> {
@@ -568,7 +614,9 @@ fn encode_direct_prompt(
 
 fn ensure_production_template(info: &LoadedModelInfo) -> Result<()> {
     match info.template_status {
-        TemplateStatus::Exact | TemplateStatus::ReviewedEquivalent => Ok(()),
+        TemplateStatus::Exact
+        | TemplateStatus::ReviewedEquivalent
+        | TemplateStatus::OverrideUnverified => Ok(()),
         TemplateStatus::Mismatch | TemplateStatus::Missing => Err(BackendError::Metadata(
             info.template_diagnostic.clone().unwrap_or_else(|| {
                 "registered artifact has no production-approved prompt template".to_owned()
@@ -580,7 +628,7 @@ fn ensure_production_template(info: &LoadedModelInfo) -> Result<()> {
 fn score_direct(
     backend: &LlamaBackend,
     model: &LlamaModel,
-    spec: &ModelEntry,
+    spec: &RuntimeModelSpec,
     options: &EngineOptions,
     info: &LoadedModelInfo,
     decision: &Decision,
@@ -598,6 +646,7 @@ fn score_direct(
     let template_status = match info.template_status {
         TemplateStatus::Exact => TemplateMetadataStatus::Exact,
         TemplateStatus::ReviewedEquivalent => TemplateMetadataStatus::ReviewedEquivalent,
+        TemplateStatus::OverrideUnverified => TemplateMetadataStatus::OverrideUnverified,
         TemplateStatus::Mismatch | TemplateStatus::Missing => {
             return Err(BackendError::Metadata(
                 "unapproved template reached production readout".to_owned(),
@@ -642,22 +691,25 @@ fn score_direct(
         prompt_version: encoded.prompt_version,
         model: ModelMetadata {
             id: spec.id.clone(),
-            source: spec.repo.clone(),
+            source: spec.source.clone(),
             revision: spec.revision.clone(),
             file: spec.file.clone(),
             quant: spec.quant.clone(),
             backend: info.backend.clone(),
             artifact_sha256: info.artifact_sha256.clone(),
-            integrity: Integrity::ManifestSha256,
+            integrity: spec.integrity,
             dtype: format!("GGUF quantized/mixed {}", spec.quant),
-            native_reference: Some(NativeReference {
-                source: spec.native_reference.source.clone(),
-                revision: spec.native_reference.revision.clone(),
-                dtype: spec.native_reference.dtype.clone(),
-            }),
+            native_reference: spec
+                .native_reference
+                .as_ref()
+                .map(|reference| NativeReference {
+                    source: reference.source.clone(),
+                    revision: reference.revision.clone(),
+                    dtype: reference.dtype.clone(),
+                }),
             template_profile: spec.profile,
             template_sha256: info.gguf_template_sha256.clone(),
-            template_override: false,
+            template_override: spec.template_override,
             template_status,
             template_equivalence_evidence,
             serving_config: Some("llama-direct-v1".to_owned()),
@@ -748,7 +800,7 @@ fn selected_device_name(info: &LoadedModelInfo) -> String {
 fn direct_smoke(
     backend: &LlamaBackend,
     model: &LlamaModel,
-    spec: &ModelEntry,
+    spec: &RuntimeModelSpec,
     options: &EngineOptions,
     info: &LoadedModelInfo,
     decision: &Decision,
@@ -1016,26 +1068,27 @@ mod tests {
     #[test]
     fn qwen_template_equivalence_is_narrowly_keyed() {
         let registry = ModelRegistry::bundled().unwrap();
-        let qwen = registry.resolve("qwen3-0.6b").unwrap();
-        let native = &qwen.native_reference.template_sha256;
+        let qwen_entry = registry.resolve("qwen3-0.6b").unwrap();
+        let qwen = RuntimeModelSpec::from(qwen_entry.clone());
+        let native = &qwen.native_reference.as_ref().unwrap().template_sha256;
         let gguf = "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361";
 
         assert_eq!(
-            adjudicate_template(qwen, &qwen.sha256, Some(native)).0,
+            adjudicate_template(&qwen, &qwen.sha256, Some(native)).0,
             TemplateStatus::Exact
         );
-        let (status, diagnostic) = adjudicate_template(qwen, &qwen.sha256, Some(gguf));
+        let (status, diagnostic) = adjudicate_template(&qwen, &qwen.sha256, Some(gguf));
         assert_eq!(status, TemplateStatus::ReviewedEquivalent);
         let diagnostic = diagnostic.unwrap();
         assert!(diagnostic.contains("not identical"));
         assert!(diagnostic.contains("two string messages"));
 
         assert_eq!(
-            adjudicate_template(qwen, &"0".repeat(64), Some(gguf)).0,
+            adjudicate_template(&qwen, &"0".repeat(64), Some(gguf)).0,
             TemplateStatus::Mismatch
         );
         assert_eq!(
-            adjudicate_template(qwen, &qwen.sha256, Some(&"2".repeat(64))).0,
+            adjudicate_template(&qwen, &qwen.sha256, Some(&"2".repeat(64))).0,
             TemplateStatus::Mismatch
         );
     }
@@ -1115,5 +1168,14 @@ mod tests {
         validate_final_chunk_local_index(513, 512, 0).unwrap();
         assert!(validate_final_chunk_local_index(513, 512, 512).is_err());
         assert!(validate_final_chunk_local_index(0, 512, 0).is_err());
+    }
+
+    #[test]
+    fn owner_thread_join_reports_panics_and_clean_shutdown() {
+        join_owner_thread(std::thread::spawn(|| {})).unwrap();
+        let error =
+            join_owner_thread(std::thread::spawn(|| panic!("test owner panic"))).unwrap_err();
+        assert!(matches!(error, BackendError::Worker(_)));
+        assert!(error.to_string().contains("panicked"));
     }
 }

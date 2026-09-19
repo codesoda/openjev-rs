@@ -226,3 +226,61 @@ Targeted `cache_hit` remediation checks also all exited 0 with `CARGO_NET_OFFLIN
 No model was resolved, loaded, or downloaded during these checks. The lengthy numerical benchmark was deliberately not rerun; retained artifact hashes/sizes still match the documented originals.
 
 Final parent/Astra adjudication: PASS. Confirmed production construction uses only `direct_inference_cache_hit()` returning `Some(false)` and no artifact-cache state; the report runner rejects contrary direct metadata. The model-free regression exercises the production helper, not native inference; no extra native rerun is claimed. Independently reran fmt, workspace clippy with warnings denied, all 78 workspace tests, diff/reference checks. Separate-Astra numerical acceptance and the independently recomputed 144/144 + 108/108 exact fields remain unchanged. M3 approved for milestone commit. The 252 create-only rows remain unchanged with the historical `cache_hit=true` defect annotated in `docs/RESULTS.md`; their raw logits and accepted numerical baseline are unaffected.
+
+## M4 — production CLI, model surfaces, and explicit serial fallback
+
+Implemented the production CLI over the M3 owner-thread direct scorer. `decide`, `noul`, `score`, `ask`, and `run` now construct complete validated core decisions before resolving any artifact. Text state from flags/files/stdin is preserved byte-for-byte without trimming or JSON guessing; structured state uses only explicit JSON flags. Explicit state returns without reading stdin, non-TTY stdin is detected in `main`, and a TTY without state fails validation. Ask consumes one strict Decision JSON document. Run consumes nonblank JSONL rows, rejects duplicate IDs and all parse/validation errors before load, preserves row order, emits per-row runtime ErrorRecords and continues safe independent rows, and exits 1 if any row failed.
+
+Repeated `decide --question` automatically requests shared execution. Explicit shared/batch run modes and repeated questions use serial full-prompt direct scoring in M4, with exact requested/effective mode metadata, nonempty M5 reason, `cache_hit=false`, serial serving config, and an stderr warning even under `--quiet`. `--require-shared` returns a pre-load structured error. No cache copy, independent sequence packing, probe receipt or fake batch timing was added. Explicit serial mode uses full prompts and no prefix metadata.
+
+Noul and Score remain thin adapters over the returned production Choice readout. Noul emits ordered `yes/no` and `p_yes`; Score requires finite aligned values (or defaults to 0..K-1) and emits expectation/argmax/distribution. Confidence is opt-in normalized margin with its exact uncalibrated status. Nonidentity permutation, nonzero seed, nondefault temperature and calibration are rejected as M7-unsupported rather than ignored. Eval/bench/calibrate and models probe return explicit milestone-specific `not_implemented` records.
+
+Added custom model resolution without weakening the registered identity path. Local files are canonicalized and hashed in place, never moved; optional caller hash yields caller integrity and omission yields `local-unverified`. Custom Hub specs require safe `OWNER/REPO`, a 40-lowercase-hex commit, safe relative filename, caller SHA-256 and explicit profile. Custom runtime specs have private construction, cannot claim manifest/native equivalence metadata, and score with `template_override=true`, `override-unverified`, and no native reference. Registered artifacts retain exact manifest fingerprints and template adjudication.
+
+Model list hashes present canonical entries and reports verified/missing/failure truthfully, plus explicit unprobed M5 statuses. Pull/path use verified canonical cache behavior and return JSON envelopes. Output preflight rejects existing/same-file/unsafe-parent targets; final creation uses `create_new`. `--output` leaves JSONL in the file and one `openjev-write-summary-v1` object on stdout. `--pretty` is restricted to single objects. Help/version are intercepted as JSON and command help includes piped examples. Broken stdout returns nonzero without panic text.
+
+A native startup deadlock was found by the first real CLI probe: `main` held a `StderrLock` while the owner thread's llama tracing callback attempted to write native logs. Main now keeps unlocked stderr/stdout handles (which lock per write), so owner startup, scoring and shutdown complete while logs remain exclusively on stderr. Owner-thread join has clean and panic regressions; no unsafe or Send/Sync workaround was introduced.
+
+Testing/evidence:
+
+- Ordinary deterministic tests inject a scorer only through the library test seam; production never emits mock readouts. They cover Noul/Score/confidence/mode adaptation without models.
+- Process tests spawn the compiled `openjev`, capture streams/exits, exercise all help surfaces, stdin precedence/no-blocking, parse-before-backend, backend-disabled behavior, JSON model list, and broken pipe.
+- Opt-in release process tests (`OPENJEV_INTEGRATION=1`) reused cached Qwen on Metal for decide/noul/score/ask/run, runtime-row continuation, output no-overwrite, repeated-question fallback, and custom local override. Three tests passed in the retained final capture.
+- Create-only reports under `docs/results/m4-*` retain per-case stdout/stderr hashes, JSON checks, model-cache envelopes and concise native evidence. No transfer or new target directory occurred.
+- Metal and true-CPU native all-target clippy/tests reused `target-m2-metal` and `target-m2-cpu`. Environment-gated M3/native tests returned immediately in ordinary feature runs; only the separately recorded release Qwen/Metal run performed inference. No six-model CPU/Metal smoke was repeated.
+
+Current local gate commands (all exit 0; final rerun recorded at handoff):
+
+- `cargo fmt --all -- --check`.
+- `CARGO_NET_OFFLINE=true cargo clippy --workspace --all-targets -- -D warnings`.
+- `CARGO_NET_OFFLINE=true cargo test --workspace` — 87 tests passed, 0 failed; integration/native surfaces were zero tests without features.
+- Default-member `CARGO_NET_OFFLINE=true cargo clippy --all-targets -- -D warnings` and `cargo test` — 63 tests passed.
+- Metal: `GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal cargo clippy/test -p openjev-llama -p openjev-cli --features openjev-cli/metal,openjev-cli/integration --all-targets` — 39 test functions passed; environment-gated integration functions did no inference with `OPENJEV_INTEGRATION` unset.
+- True CPU: the equivalent commands with `GGML_METAL=OFF`, `target-m2-cpu`, and `openjev-cli/native,openjev-cli/integration` — 39 test functions passed; no model load.
+- Actual opt-in Metal CLI: `OPENJEV_INTEGRATION=1 ... cargo test --release -p openjev-cli --features metal,integration --test native_cli -- --nocapture` — 3/3 process tests passed using the cached Qwen artifact; the post-help-validation rerun is retained as `m4-native-cli-tests-final2.txt`.
+- `git diff --check` and `git diff --exit-code -- reference`.
+
+M4 is ready for parent/Astra review. No commit was created.
+
+### Astra M4 targeted gate remediation
+
+Astra's targeted review blocked M4 on two concrete implementation defects and one nonblocking help-metadata defect. All three are now fixed locally; parent/Astra targeted confirmation remains pending.
+
+1. Custom Hub resolution no longer gives hf-hub an unchecked `cache/hub`. Registered and caller-hashed Hub paths now share a pre-download containment preflight that creates and validates the canonical Hub root plus hf-hub's `.locks/models--…`, repository, `blobs`, pinned `snapshots/<commit>/<nested file parent>`, and `.no_exist` parents before downloader invocation. Existing or nested parent symlink escapes fail with `CacheSafety` before the injected downloader runs. Postfetch resolution requires the exact pinned snapshot path, a canonical regular file inside the owned Hub, and the caller SHA-256; custom artifacts safely derive their byte count from the hashed file. Offline custom resolution rejects a hash-correct snapshot symlink to an external target without fetching or modifying the target. Tiny zero-network regressions cover online root/lock/repository/blob/snapshot-parent escapes with zero downloader calls, offline external-target refusal, and normal mock download plus offline reuse. No local/external file is quarantined or repaired, and same-user concurrent malicious filesystem races remain out of scope.
+2. `run` no longer buffers every result in a `Vec`. Complete JSONL parsing/validation and output alias preflight remain before model startup; a selected `--output` file is then atomically reserved with `create_new` before scorer loading. Each success or ErrorRecord is serialized and flushed before the next score starts. stdout follows the same per-row flush policy. A sink error stops later scoring immediately and still calls owner shutdown; a file summary is emitted only after all rows, clean shutdown, and file sync complete. The documented failure policy is intentional: startup failure leaves the newly reserved file empty, while a later sink failure leaves only its flushed prefix and no summary. Model-free injected-scorer/sink tests prove row-one visibility before call two and prove call three is skipped after a call-two broken pipe. The cached-Qwen release process test additionally observed the first of 20 file rows while the process was still scoring.
+3. Help metadata now matches clap's rendered help against the built command tree, instead of scanning raw tokens. The `command` and `usage` fields therefore identify `openjev models pull` for nested help, even when global `--model` values are `run`/`models` before or after the subcommand. Regressions cover long/short help and clap's `help models pull` alias; every help response remains one stdout JSON object with empty stderr.
+
+A new create-only native capture, `docs/results/m4-native-cli-tests-final3.txt` (760 bytes, SHA-256 `1e55eb8c870cc792ca2add8e9b81b9a096726040f2e556518bfd7209b83b4f73`), supersedes but does not overwrite the earlier M4 native-test captures. It records 4/4 release Metal process tests passing in 9.39 seconds against the cached Qwen artifact, including incremental file visibility. No network transfer, real-weight copy, new target directory, M5 behavior, or reference change occurred.
+
+Final targeted-remediation commands all exited 0:
+
+- `cargo fmt --all` and `cargo fmt --all -- --check`.
+- `CARGO_NET_OFFLINE=true cargo clippy --workspace --all-targets -- -D warnings`.
+- `CARGO_NET_OFFLINE=true cargo test --workspace` — 97 tests passed (17 CLI, 50 core, 30 backend/cache/registry), 0 failed; doc-test harnesses contained 0 tests.
+- Default-member `CARGO_NET_OFFLINE=true cargo clippy --all-targets -- -D warnings` and `cargo test` — 67 tests passed (17 CLI, 50 core), 0 failed.
+- Metal in existing `target-m2-metal`: clippy/test for `openjev-llama` + `openjev-cli` with `openjev-cli/metal,openjev-cli/integration` — 48 test functions passed; environment-gated integration functions did no inference with `OPENJEV_INTEGRATION` unset.
+- True CPU in existing `target-m2-cpu`: equivalent clippy/test with `GGML_METAL=OFF` and `openjev-cli/native,openjev-cli/integration` — 48 test functions passed; environment-gated integration functions did no inference.
+- Actual cached Metal release process gate with `OPENJEV_INTEGRATION=1` — 4/4 native CLI tests passed; the new test observed incremental file output before process completion.
+- `git diff --check`; `git diff --exit-code -- reference` confirmed no reference changes.
+
+Final parent/Astra targeted adjudication: PASS. Inspected shared custom/registered pre-download containment, exact postfetch snapshot ownership, immediate write/flush per row before next scoring, create-new sink reservation and shutdown-on-output-error. The targeted fixes resolve separate-Astra M4 blockers; help metadata regression coverage is included. Independently ran fmt, workspace clippy with warnings denied, all 97 workspace tests, diff/reference checks. Earlier parent release probes verified JSON-only help/decide/noul and exit-2 validation. Native 4/4 streaming capture is retained with hash. M4 approved for milestone commit; genuine shared/batch work remains M5.

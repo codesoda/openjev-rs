@@ -7,16 +7,20 @@
 
 use std::path::PathBuf;
 
-use openjev_core::PromptProfile;
+use openjev_core::{Integrity, PromptProfile};
 use thiserror::Error;
 
 pub mod cache;
+pub mod model;
 pub mod registry;
 
 #[cfg(feature = "native")]
 pub mod engine;
 
 pub use cache::{CacheOptions, ModelCache, VerifiedArtifact, hash_file};
+#[cfg(feature = "native")]
+pub use model::resolve_model_spec;
+pub use model::{validate_hub_identity, validate_sha256};
 pub use registry::{ModelEntry, ModelRegistry, NativeReferenceSpec, TemplateEquivalenceSpec};
 
 #[cfg(feature = "native")]
@@ -50,6 +54,117 @@ pub enum ModelSpec {
     },
 }
 
+/// Fully resolved model identity consumed by the owner-thread engine.
+///
+/// Registered artifacts retain their reviewed native/template metadata. Custom
+/// artifacts always use an explicit profile override and never acquire a
+/// fabricated native reference or golden-equivalence claim.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeModelSpec {
+    pub(crate) id: String,
+    pub(crate) source: String,
+    pub(crate) revision: String,
+    pub(crate) file: String,
+    pub(crate) bytes: u64,
+    pub(crate) sha256: String,
+    pub(crate) quant: String,
+    pub(crate) profile: PromptProfile,
+    pub(crate) integrity: Integrity,
+    pub(crate) native_reference: Option<NativeReferenceSpec>,
+    pub(crate) template_equivalence: Option<TemplateEquivalenceSpec>,
+    pub(crate) template_override: bool,
+}
+
+impl RuntimeModelSpec {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub const fn integrity(&self) -> Integrity {
+        self.integrity
+    }
+
+    #[cfg(feature = "native")]
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.id.is_empty()
+            || self.source.is_empty()
+            || self.revision.is_empty()
+            || self.file.is_empty()
+            || self.bytes == 0
+            || self.sha256.len() != 64
+            || !self
+                .sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(BackendError::Configuration(
+                "resolved model identity is incomplete or invalid".to_owned(),
+            ));
+        }
+        if self.template_override {
+            if self.native_reference.is_some()
+                || self.template_equivalence.is_some()
+                || self.integrity == Integrity::ManifestSha256
+            {
+                return Err(BackendError::Configuration(
+                    "custom template overrides cannot claim registered native/equivalence metadata"
+                        .to_owned(),
+                ));
+            }
+        } else if self.native_reference.is_none() || self.integrity != Integrity::ManifestSha256 {
+            return Err(BackendError::Configuration(
+                "registered model identity requires manifest integrity and native metadata"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl From<ModelEntry> for RuntimeModelSpec {
+    fn from(model: ModelEntry) -> Self {
+        Self {
+            id: model.id,
+            source: model.repo,
+            revision: model.revision,
+            file: model.file,
+            bytes: model.bytes,
+            sha256: model.sha256,
+            quant: model.quant,
+            profile: model.profile,
+            integrity: Integrity::ManifestSha256,
+            native_reference: Some(model.native_reference),
+            template_equivalence: model.template_equivalence,
+            template_override: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedModel {
+    pub(crate) model: RuntimeModelSpec,
+    pub(crate) artifact: VerifiedArtifact,
+}
+
+impl ResolvedModel {
+    #[must_use]
+    pub const fn model(&self) -> &RuntimeModelSpec {
+        &self.model
+    }
+
+    #[must_use]
+    pub const fn artifact(&self) -> &VerifiedArtifact {
+        &self.artifact
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (RuntimeModelSpec, VerifiedArtifact) {
+        (self.model, self.artifact)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum BackendError {
     #[error("backend unavailable: build openjev-llama with native, metal, or cuda")]
@@ -72,6 +187,15 @@ pub enum BackendError {
         path: PathBuf,
         expected_bytes: u64,
         actual_bytes: u64,
+        expected_sha256: String,
+        actual_sha256: String,
+    },
+    #[error(
+        "caller artifact SHA-256 failure at {path}: expected {expected_sha256}, got {actual_sha256}",
+        path = path.display()
+    )]
+    CallerIntegrity {
+        path: PathBuf,
         expected_sha256: String,
         actual_sha256: String,
     },

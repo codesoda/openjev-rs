@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openjev:commands:v1",
+  "oneOf": [
+    {"$ref": "#/$defs/Models"},
+    {"$ref": "#/$defs/ModelPath"},
+    {"$ref": "#/$defs/Help"},
+    {"$ref": "#/$defs/Version"},
+    {"$ref": "#/$defs/WriteSummary"}
+  ],
+  "$defs": {
+    "Hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ModelStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "revision", "file", "bytes", "sha256", "quant", "template_profile", "cached", "verified", "cache_status", "path", "support_status", "shared_probe_status", "batch_probe_status"],
+      "properties": {
+        "id": {"type": "string"},
+        "source": {"type": "string"},
+        "revision": {"type": "string"},
+        "file": {"type": "string"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/Hash"},
+        "quant": {"type": "string"},
+        "template_profile": {"enum": ["qwen3", "qwen3.5", "minicpm5"]},
+        "cached": {"type": "boolean"},
+        "verified": {"type": "boolean"},
+        "cache_status": {"type": "string"},
+        "path": {"type": ["string", "null"]},
+        "support_status": {"type": "string"},
+        "shared_probe_status": {"type": "string"},
+        "batch_probe_status": {"type": "string"}
+      }
+    },
+    "Models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "default_model", "cache_root", "models"],
+      "properties": {
+        "schema": {"const": "openjev-models-v1"},
+        "default_model": {"type": "string"},
+        "cache_root": {"type": "string"},
+        "models": {"type": "array", "items": {"$ref": "#/$defs/ModelStatus"}}
+      }
+    },
+    "ModelPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "id", "path", "bytes", "sha256", "integrity", "cache_hit"],
+      "properties": {
+        "schema": {"const": "openjev-model-path-v1"},
+        "id": {"type": "string"},
+        "path": {"type": "string"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/Hash"},
+        "integrity": {"enum": ["manifest-sha256", "caller-sha256", "local-unverified"]},
+        "cache_hit": {"type": "boolean"}
+      }
+    },
+    "Help": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "command", "usage", "text"],
+      "properties": {
+        "schema": {"const": "openjev-help-v1"},
+        "command": {"type": "string"},
+        "usage": {"type": "string"},
+        "text": {"type": "string"}
+      }
+    },
+    "Version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "build"],
+      "properties": {
+        "schema": {"const": "openjev-version-v1"},
+        "version": {"type": "string"},
+        "build": {"type": "string"}
+      }
+    },
+    "WriteSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "path", "written", "failed"],
+      "properties": {
+        "schema": {"const": "openjev-write-summary-v1"},
+        "path": {"type": "string"},
+        "written": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

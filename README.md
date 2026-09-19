@@ -16,17 +16,36 @@ Independent project. Not affiliated with or endorsed by TypeSafe AI or SemIf.
 
 ## Current status
 
-M1 provides the backend-neutral core, exact restricted prompt renderers, schema,
-evaluation subset, feature-disabled backend boundary, and JSON-only CLI parser.
-M2 adds the pinned three-model registry, verified canonical cache, owner-thread
-native loader, and a small JSONL direct-smoke example. All three exact GGUFs
-loaded and produced finite readouts on Metal and true CPU. MiniCPM5/Qwen3.5 have
-exact template hashes. Qwen3's GGUF and native templates are nonidentical;
-parent/Astra approved a manifest-keyed `reviewed-equivalent` status only for the
-restricted two-string-message, no-tools, disabled-thinking profile. Unseen hash
-triples remain failures. The public production scoring CLI remains M4, so
-ordinary scoring commands still return structured `backend_unavailable` rather
-than exposing the smoke harness.
+M1 provides the backend-neutral core, exact restricted prompt renderers and
+schemas. M2 adds the pinned three-model registry, verified canonical cache and
+owner-thread native loader. M3 adds the complete production direct `Readout`
+and passed the strict cached Qwen3 authored144 plus perturbations108 prompt,
+token and slot gates.
+
+M4 exposes that production path through `openjev decide`, `noul`, `score`,
+`ask`, `run`, and `models list|pull|path`. Input is fully validated before model
+load; stdout is JSON/JSONL only; native/progress/warning/error logs use stderr;
+file output is create-only. `run` writes and flushes each success or ErrorRecord
+before scoring the next row instead of retaining the run in memory. Noul and
+Score are transparent direct-Choice adapters, and opt-in confidence is the
+labelled uncalibrated normalized margin.
+A backend-disabled build parses and validates inputs but returns structured
+`backend_unavailable` rather than fake probabilities.
+
+Shared KV copy and independent packed batching remain M5 work. Repeated
+`decide --question` and explicit `run --mode shared|batch` therefore report
+`requested_mode=shared|batch`, `effective_mode=serial`, a nonempty M5 fallback
+reason, and an stderr warning even with `--quiet`. `--require-shared` fails.
+The serial fallback scores complete prompts and reports `cache_hit=false`; it
+never claims prefix reuse. Eval/bench remain explicit M6 not-implemented
+surfaces, and calibration/permutation/nondefault temperature remain M7.
+
+MiniCPM5/Qwen3.5 have exact template hashes. Qwen3's GGUF and native templates
+are nonidentical; parent/Astra approved a manifest-keyed `reviewed-equivalent`
+status only for the restricted two-string-message, no-tools, disabled-thinking
+profile. Unseen registered hash triples remain failures. Custom local/Hub GGUFs
+require an explicit template profile and are labelled `override-unverified`,
+with no fabricated native reference or golden claim.
 
 Raw JSON input through the explicit parser or serde_json's string, slice, and
 reader routes accepts at most 128 nested arrays/objects per complete document
@@ -47,8 +66,95 @@ The core carries these limitations into future readouts:
   is not calibrated operational confidence.
 
 See `docs/PLAN.md` for the reviewed milestone contract,
-`docs/RESULTS.md` for M2 evidence, and `schemas/readout-v1.schema.json` for the
-normative emitted-readout schema.
+`docs/RESULTS.md` for runtime evidence, `schemas/readout-v1.schema.json` for the
+normative emitted-readout schema, and `schemas/commands-v1.schema.json` for M4
+command envelopes.
+
+## Build and install the M4 CLI
+
+The ordinary workspace build deliberately excludes llama.cpp:
+
+```sh
+cargo build
+# Parsing/help/models-list work; scoring returns backend_unavailable.
+```
+
+Use the existing device-specific target directory for a native CLI. On Apple
+Silicon, the Metal build defaults to Metal with all layers requested. A true
+CPU build defaults to CPU, requests zero GPU layers, and disables KQV/op
+offload. Do not share one target directory between those native configurations.
+
+```sh
+# Metal
+GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal \
+  cargo build --release -p openjev-cli --features metal
+install -m 0755 target-m2-metal/release/openjev "$HOME/.local/bin/openjev"
+
+# True CPU on macOS
+GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu \
+  cargo build --release -p openjev-cli --features native
+```
+
+The product default model remains `minicpm5-2b`. The examples use cached
+`qwen3-0.6b` for fast local exercise:
+
+```sh
+# State from a flag; strings are not trimmed.
+openjev --offline --model qwen3-0.6b decide \
+  --state 'customer cannot sign in' \
+  --question 'Which queue?' --option 'Account access' --option Billing
+
+# State from stdin. Structured state requires --state-json/--state-json-file.
+printf 'suspicious message\n' | openjev --offline --model qwen3-0.6b noul \
+  --question 'Is this phishing?'
+
+openjev --offline --model qwen3-0.6b score --state-json '{"severity": 3}' \
+  --question 'How urgent?' --level low --level medium --level high \
+  --level-value 0 --level-value 5 --level-value 10
+
+printf '%s\n' \
+  '{"id":"d1","state":"ticket","question":"Queue?","options":[{"id":"access","description":"Account access"},{"id":"billing","description":"Billing"}]}' \
+  | openjev --offline --model qwen3-0.6b ask
+
+openjev --offline --model qwen3-0.6b run \
+  --input decisions.jsonl --output new-results.jsonl
+openjev models list
+openjev --offline models path qwen3-0.6b
+```
+
+Exactly one state source is accepted for `decide`/`noul`/`score`:
+`--state`, `--state-file`, `--state-json`, `--state-json-file`, or non-TTY
+stdin. Explicit state never reads stdin. A TTY without state is an error.
+`ask` takes one complete Decision object; `run` takes JSONL, ignores blank
+lines, preserves row order, emits and flushes per-row runtime errors and
+continues, then exits 1 if any row failed. Fatal parse/validation errors exit 2
+before native loading. For `run --output`, the create-only destination is
+reserved after complete input validation but before model startup. A startup
+failure therefore leaves a new empty file; later output failure leaves the
+already flushed prefix, stops further inference, shuts down the owner worker,
+and emits no completed write summary. The summary is written only after every
+row and file sync complete. `--pretty` is only for a single object and is
+rejected for JSONL.
+
+Pinned pulls use the canonical cache (`--cache-dir`, then `$OPENJEV_HOME`, then
+`~/.cache/openjev`) and verify complete size plus SHA-256. Registered and custom
+Hub downloads preflight canonical containment of the Hub lock, repository,
+blob, snapshot, and negative-cache parents before hf-hub can mutate them, then
+require the returned regular file to remain inside the owned Hub. `models path`
+emits a JSON envelope, never a bare path. Examples:
+
+```sh
+openjev models pull qwen3-0.6b
+openjev --offline models path qwen3-0.6b
+
+# Local custom artifact: expected hash is optional; omission is honestly
+# labelled local-unverified. The file is hashed in place and never moved.
+openjev --model /models/custom.gguf --template-profile qwen3 decide ...
+
+# Remote custom artifact: commit, expected hash, and profile are mandatory.
+openjev --model 'hf:owner/repo@0123456789abcdef0123456789abcdef01234567:model.gguf' \
+  --model-sha256 64-lowercase-hex --template-profile qwen3 decide ...
+```
 
 ## M2 native smoke commands
 

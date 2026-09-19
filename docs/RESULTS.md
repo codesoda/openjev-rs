@@ -2,7 +2,7 @@
 
 ## M2 — exact pinned GGUF smoke
 
-Status: **targeted M2 remediation is implemented and all three exact artifacts now pass the create-only offline Metal and true-CPU smoke captures; final parent/Astra verification remains required before commit.** MiniCPM5-2B and Qwen3.5-4B have `exact` template status. Qwen3-0.6B remains a nonidentical template pair and has the narrower `reviewed-equivalent` status approved by parent/Astra for exactly two string system/user messages, no tools, `add_generation_prompt=true`, and `enable_thinking=false`. This does not relabel the templates identical or approve tool, multimodal, assistant-reasoning, or arbitrary multi-turn behavior.
+Status: **approved and committed. All three exact artifacts pass the create-only offline Metal and true-CPU smoke captures.** MiniCPM5-2B and Qwen3.5-4B have `exact` template status. Qwen3-0.6B remains a nonidentical template pair and has the narrower `reviewed-equivalent` status approved by parent/Astra for exactly two string system/user messages, no tools, `add_generation_prompt=true`, and `enable_thinking=false`. This does not relabel the templates identical or approve tool, multimodal, assistant-reasoning, or arbitrary multi-turn behavior.
 
 ### Host and native builds
 
@@ -69,7 +69,7 @@ These rows are a small M2 smoke only. They are not M3 authored144 prompt/token/l
 
 ## M3 — production direct readout and strict Qwen parity
 
-Status: **implemented locally; the exact authored144 gate passed and Astra accepted the measured numerical baseline. A targeted `cache_hit` metadata fix now awaits parent/Astra re-review before commit.** M4 CLI, M5 shared/batch execution, and M6 performance/eval commands were not implemented.
+Status: **approved and committed. The exact authored144 gate passed, Astra accepted the measured numerical baseline, and the targeted direct `cache_hit=false` correction passed final parent/Astra review.** The sentence that M4 CLI was absent describes the M3 commit boundary; current M4 evidence is recorded below.
 
 Production `EngineHandle::score_direct` now returns a validated full `openjev-readout-v1` from one clean prompt prefill per decision (chunking allowed), with no per-row warmup and no generation. All option slots are single-token/ASCII/unique/in-vocabulary and append-boundary checked before decode. Forward timing spans decode plus synchronized `get_logits_ith`/logit copy; total timing includes prompt rendering, tokenization/slot validation, context construction, f64 readout, and metadata construction. Every direct call creates a fresh context and prefills the complete prompt, so production readouts now report inference `cache_hit=false` regardless of whether the GGUF artifact was already in the download cache. Artifact cache status remains separate cache/runner metadata. The M2 `smoke_direct` path remains deliberately two-pass (warmup plus measured).
 
@@ -126,3 +126,37 @@ Evidence note: the original 252 create-only production rows are preserved byte-f
 - `m3-qwen3-metal-run.stderr.txt`: reduced native stderr, 3,119 bytes, SHA-256 `819b7cd85667df45f61ad0cb5b4ec797661e8ceeb4f022b1f68cc14c15057333`, with command/device/offload/context evidence and the original raw capture hash/size; native logs never entered stdout.
 
 The report also records hashes/sizes for authored144, perturbations108, and the 252-row reference; complete model/config metadata; exact-gate counts; mismatch IDs; and both reference/local margins. Files were created with create-new semantics. No model was downloaded, no new native target directory was made, and `reference/` remains unchanged.
+
+## M4 — production CLI and serial fallback
+
+Status: **implemented locally; initial evidence plus targeted Astra-remediation gates pass, pending parent/Astra targeted recheck before commit.** M5 KV copy and independent sequence packing remain absent.
+
+The release Metal CLI was built in the existing `target-m2-metal` directory and exercised only the already verified cached Qwen3-0.6B artifact with `--offline`. Seven create-only probe cases covered direct `decide` with confidence, stdin Noul, structured-state Score with explicit finite values, stdin `ask`, ordered two-row `run`, repeated-question automatic shared request with serial fallback, and `--require-shared` refusal. Every success stdout line parsed as exactly one JSON object; native llama logs stayed on stderr. Direct/serial-full-prompt rows reported the production readout string and `cache_hit=false`.
+
+The repeated-question case emitted two rows in order with `requested_mode=shared`, `effective_mode=serial`, fallback reason `shared execution is not implemented or probed until M5`, and an stderr warning despite `--quiet`. `--require-shared` exited 2 with empty stdout and a structured `unsupported` stderr record before native load. No shared/batch probe receipt or performance claim was created.
+
+Primitive checks:
+
+- Noul emitted `primitive=noul`, ordered `yes/no` distribution and numeric `p_yes`.
+- Score emitted finite `level_values`, unchanged distribution, finite expectation and argmax level.
+- Confidence was opt-in and labelled `normalized margin; uncalibrated`.
+- Every observed production row retained `gpu_layers_actual=null` / `gpu_layers_status=unavailable` for Metal rather than copying the all-layers request into an actual count; native stderr remained the offload evidence.
+
+Model commands were separately exercised. `models list` returned `openjev-models-v1` and recomputed complete size/SHA verification for all three canonical cached artifacts; every row was `cached=true`, `verified=true`, with shared/batch status explicitly `not-implemented-or-probed-until-m5`. `models path qwen3-0.6b` and offline `models pull qwen3-0.6b` returned `openjev-model-path-v1` JSON envelopes with the verified path/hash—not bare strings—and no network request. The opt-in process test also scored the cached Qwen file as a caller-hashed custom local artifact and observed `source=local`, `integrity=caller-sha256`, `template_override=true`, `template_status=override-unverified`, and no `native_reference`.
+
+Automated process coverage includes JSON help/version for every command surface, parse-aware nested command/usage metadata even when global option values equal command names, piped examples, usage and backend-disabled exits, explicit-state no-stdin-blocking, fatal JSONL parse before backend, model-list envelopes, broken-pipe nonpanic behavior, deterministic model-free primitive/fallback injection, runtime-row failure continuation, create-only no-overwrite/empty-on-startup-failure policy, and owner-thread clean/panic join handling. Injected scorer/sink tests prove each row is visible and flushed before the next score and that output failure stops later calls while shutting down. The native opt-in suite used a long but valid row under `--max-tokens 128` to produce success/error/success JSONL in input order and exit 1, and a separate 20-row cached-Qwen process observed the first output-file row before the process completed.
+
+Custom Hub cache tests now exercise the shared registered/custom pre-download containment preflight. Tiny files prove hf-hub's root, `.locks`, repository, blob, snapshot/nested-filename and negative-cache parents are canonical owned directories before an injected downloader can run; every escape case records zero downloader calls. Offline resolution rejects an external snapshot target without modifying it, while a normal mock download and offline owned-path reuse pass with caller SHA-256 and discovered byte length. No test contacts the network or downloads weights.
+
+Retained create-only evidence:
+
+- `m4-cli-metal-probes-final.json`: 5,627 bytes, SHA-256 `8bbbfda271fcd5b43d32b15ae8740c5d86de42e141c8a2b82ea6aaad0a4cee0f`; final seven cases, exact stdout/stderr hashes/counts and repeated-question group identity.
+- `m4-cli-metal-probes-final.stderr.txt`: 3,252 bytes, SHA-256 `9e909b1bd8ac96b1028af057e0a33ce8ee1542da95f4813ff4b5642a305b2dba`; concise selected warning/load/offload lines plus raw stderr hashes and sizes.
+- `m4-models-metal-probes-final.json`: 5,042 bytes, SHA-256 `b3c096b4600384d5e973cf2dffa8a6c8ce6684dd27bbcf2d864d108d035b3a8a`; final list/path/offline-pull envelopes, including honest `registered-runtime-load-not-attempted-by-list` support status.
+- `m4-native-cli-tests-final.txt`: 692 bytes, SHA-256 `dfc9a28153c42df9eda77d7a10a563dcf8ef68385ea49f020c09cb95ac9d0329`; three opt-in release process tests passed before the final nested-help validation addition.
+- `m4-native-cli-tests-final2.txt`: 593 bytes, SHA-256 `3de4298277c1e9264317ad058ca8fb4a373da9dbd6ac7865fc3d624b258c76c2`; final post-change opt-in release rerun, 3/3 process tests passed in 9.48 seconds.
+- `m4-native-cli-tests-final3.txt`: 760 bytes, SHA-256 `1e55eb8c870cc792ca2add8e9b81b9a096726040f2e556518bfd7209b83b4f73`; create-only targeted-remediation rerun, 4/4 release Metal process tests passed in 9.39 seconds, including first-row file visibility before process completion.
+
+The corresponding earlier M4 files are immutable passing captures retained for chronology. The `final3` test capture supersedes but does not overwrite `final2` after custom Hub mutation containment, true streaming run output, and clap-tree help metadata remediation; the earlier probe/model captures remain the latest probe evidence.
+
+No GGUF was downloaded or copied, no new native target directory was created, and no all-model or long true-CPU inference smoke was rerun. The existing `target-m2-metal` and `target-m2-cpu` directories were reused for feature clippy/tests; actual new M4 inference was Qwen/Metal only. Eval, bench, calibration, permutation/temperature transforms, shared KV copy, probe eligibility, and packed batch timing remain explicitly unimplemented.

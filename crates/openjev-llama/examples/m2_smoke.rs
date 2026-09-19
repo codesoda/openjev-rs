@@ -118,7 +118,9 @@ mod native {
             match result {
                 Ok((artifact, smoke)) => {
                     let outcome = match smoke.model.template_status {
-                        TemplateStatus::Exact | TemplateStatus::ReviewedEquivalent => "passed",
+                        TemplateStatus::Exact
+                        | TemplateStatus::ReviewedEquivalent
+                        | TemplateStatus::OverrideUnverified => "passed",
                         TemplateStatus::Mismatch | TemplateStatus::Missing => {
                             failed = true;
                             "needs-template-adjudication"
