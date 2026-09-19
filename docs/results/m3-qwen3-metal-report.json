@@ -1,0 +1,176 @@
+{
+  "schema": "openjev-m3-parity-report-v1",
+  "status": "passed",
+  "reference_predictions": {
+    "path": "/Users/chrisraethke/projects/openjev-rs/crates/openjev-llama/../../reference/semif-py/browser-ladder-qwen3-0.6b.predictions.jsonl",
+    "bytes": 223498,
+    "sha256": "f0a626a7442879a14d5fbbe702638e047358644151e0b71552d81fef7ac515ac",
+    "rows": 252
+  },
+  "model": {
+    "id": "qwen3-0.6b",
+    "artifact_sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+    "architecture": "qwen3",
+    "n_ctx_train": 40960,
+    "vocabulary_size": 151936,
+    "model_bytes": 633495552,
+    "profile": "qwen3",
+    "gguf_template_sha256": "57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361",
+    "expected_native_template_sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+    "template_status": "reviewed-equivalent",
+    "template_diagnostic": "GGUF template 57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361 is not identical to native template a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8; reviewed equivalent only for two string messages (system then user), no tools, add_generation_prompt=true, enable_thinking=false. Evidence: fixtures/qwen-template-equivalence.json. Tool, multimodal, assistant-reasoning, and arbitrary multi-turn behavior is outside this approval",
+    "load_seconds": 0.275949292,
+    "backend": "llama-cpp-2/0.1.156 llama.cpp/e79e4bf660e19f2ad851e06c6913f7a8c5852621",
+    "device_requested": "metal",
+    "gpu_layers_requested": "all",
+    "gpu_layers_actual": null,
+    "gpu_layers_status": "unavailable",
+    "runtime_devices": [
+      {
+        "name": "MTL0",
+        "description": "Apple M3 Pro",
+        "backend": "MTL",
+        "device_type": "Gpu",
+        "memory_total": 14302248960,
+        "memory_free": 13668270080
+      },
+      {
+        "name": "CPU",
+        "description": "Apple M3 Pro",
+        "backend": "CPU",
+        "device_type": "Cpu",
+        "memory_total": 19327352832,
+        "memory_free": 19327352832
+      }
+    ]
+  },
+  "config": {
+    "device": "metal",
+    "gpu_layers_requested": "all",
+    "threads": 11,
+    "n_ctx_requested": null,
+    "max_tokens": 4096,
+    "max_context_tokens": 32768,
+    "n_batch": 512,
+    "n_ubatch": 512,
+    "offline": true,
+    "one_prefill_per_decision": true,
+    "generation": false
+  },
+  "authored144": {
+    "fixture": {
+      "path": "/Users/chrisraethke/projects/openjev-rs/crates/openjev-llama/../../reference/semif-py/benchmarks/data/authored144.jsonl",
+      "bytes": 193250,
+      "sha256": "8162d1c73f925af64453f1ec05ef36d583b3815bf698e60f0d454bd11537e079",
+      "rows": 144
+    },
+    "predictions": {
+      "path": "docs/results/m3-qwen3-metal-authored144.predictions.jsonl",
+      "bytes": 388242,
+      "sha256": "95bff7a6b8a4fcd73deffd2db7de7f88900530726264096266b0a9cf8976bc67",
+      "rows": 144
+    },
+    "exact_gate": {
+      "rows": 144,
+      "prompt_sha256_exact": 144,
+      "input_tokens_exact": 144,
+      "option_ids_exact": 144,
+      "answer_token_ids_exact": 144,
+      "all_slot_boundaries_verified": 144,
+      "finite_readouts": 144,
+      "status": "passed"
+    },
+    "numerical_comparison_vs_native_bf16": {
+      "rows": 144,
+      "slot_values": 432,
+      "argmax_agreement": 140,
+      "argmax_agreement_rate": 0.9722222222222222,
+      "logit_mae": 0.5343129679008767,
+      "logit_rmse": 0.6642278428877068,
+      "logit_max_abs": 2.5432090759277344,
+      "probability_mae": 0.023045874039795144,
+      "probability_rmse": 0.06861812299296068,
+      "probability_max_abs": 0.5132661590358244,
+      "mismatch_ids": [
+        {
+          "id": "533d4423d311de82b27d",
+          "reference_choice": "B",
+          "local_choice": "A",
+          "reference_margin": 0.3583546045379109,
+          "local_margin": 0.006305549440557889
+        },
+        {
+          "id": "e1d610bd14e3d16c09b9",
+          "reference_choice": "B",
+          "local_choice": "A",
+          "reference_margin": 0.634823671434647,
+          "local_margin": 0.39164501302470445
+        },
+        {
+          "id": "6db17cc22bd656d78558",
+          "reference_choice": "prohibited",
+          "local_choice": "permitted",
+          "reference_margin": 0.19446019761510924,
+          "local_margin": 0.12673019879627945
+        },
+        {
+          "id": "b8c5b9b285cbdddc9f8d",
+          "reference_choice": "B",
+          "local_choice": "insufficient",
+          "reference_margin": 0.18514626169872056,
+          "local_margin": 0.3390479837886815
+        }
+      ]
+    }
+  },
+  "perturbations108": {
+    "fixture": {
+      "path": "/Users/chrisraethke/projects/openjev-rs/crates/openjev-llama/../../reference/semif-py/benchmarks/data/perturbations108.jsonl",
+      "bytes": 103443,
+      "sha256": "1dd7ccf80518d0e34886478ca23982aa726e9daccd343b9e95cedaf6b569bec4",
+      "rows": 108
+    },
+    "predictions": {
+      "path": "docs/results/m3-qwen3-metal-perturbations108.predictions.jsonl",
+      "bytes": 291218,
+      "sha256": "4272e100f23774e93bbaeaab740c697562519185bcde4701b0fdf5dd36f7103a",
+      "rows": 108
+    },
+    "exact_gate": {
+      "rows": 108,
+      "prompt_sha256_exact": 108,
+      "input_tokens_exact": 108,
+      "option_ids_exact": 108,
+      "answer_token_ids_exact": 108,
+      "all_slot_boundaries_verified": 108,
+      "finite_readouts": 108,
+      "status": "passed"
+    },
+    "numerical_comparison_vs_native_bf16": {
+      "rows": 108,
+      "slot_values": 324,
+      "argmax_agreement": 107,
+      "argmax_agreement_rate": 0.9907407407407407,
+      "logit_mae": 0.5653344849009573,
+      "logit_rmse": 0.7211556007255302,
+      "logit_max_abs": 2.5918960571289062,
+      "probability_mae": 0.014598768089709543,
+      "probability_rmse": 0.05662142274682297,
+      "probability_max_abs": 0.5428523314674139,
+      "mismatch_ids": [
+        {
+          "id": "0b580003cbe6b93cefd6",
+          "reference_choice": "A",
+          "local_choice": "B",
+          "reference_margin": 0.4620846896889781,
+          "local_margin": 0.6235737429642679
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "The numerical comparison is local Q8_0 GGUF versus committed native-BF16 reference rows, not same-artifact backend parity.",
+    "No numerical acceptance threshold is asserted; Astra must adjudicate the measured quantization delta.",
+    "The perturbations108 result is extended coverage and does not weaken the mandatory authored144 gate."
+  ]
+}

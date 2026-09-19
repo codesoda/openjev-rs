@@ -318,7 +318,22 @@ with 54 workspace tests passing. The fixes do not enter M2/M7 algorithm scope.
 
 Section 8 outcomes: architecture loading succeeded for all three (`qwen3`, `llama`, `qwen35`) on the pinned 0.1.156 source, so no unsupported `LLAMA_CPP_PATH`, dynamic-link, fork, mistralrs, or model-removal workaround was attempted. MiniCPM5 and Qwen3.5 are exact-template matches; Qwen3 is narrowly reviewed-equivalent, not exact. CPU/Metal flags and observed runtime evidence are recorded rather than inferred. Hybrid shared correctness remains M5 and no shared/batch/permutation implementation was added in M2.
 
-M3's exhaustive authored144 parity and mandatory exact Qwen prompt-hash/token gate remain next and were not run or claimed. M2 is approved for its milestone commit after parent/Astra code/evidence review.
+The sentence above records M2's boundary at its commit. M3 has since been implemented locally as described below; no M4+ claim is implied.
+
+### M3 implementation status (numerical baseline accepted; targeted metadata re-review pending)
+
+- [x] Added production owner-thread `EngineHandle::score_direct` returning the full validated core `Readout`, with one clean prefill per decision, chunk-local final-logit retrieval, f64 postprocessing, no per-row warmup, no generation, no fallback, and mode-accurate timings/metadata. Direct readout `cache_hit` is now always `false` because every call creates a fresh context/full prefill; download-cache status remains separate cache/runner metadata. A model-free unit regression covers repeated direct metadata for a cached artifact, and the M3 runner now rejects any direct row that does not report `false`.
+- [x] Reran offline fmt/check, workspace clippy/tests (78 passed), default-member clippy/tests (54 passed), and existing Metal/true-CPU native clippy/tests (26 unit tests each); diff check and unchanged-reference check passed. No model was resolved or benchmark rerun.
+- [x] Preserved the M2 two-pass smoke path while exposing opt-in encoded prompt/reference validation for the integration gate. Generic all-slot/token-piece/collision/vocabulary/append-boundary verification remains mandatory.
+- [x] Changed normative `ExecutionMetadata.gpu_layers_actual` to integer-or-null and added `gpu_layers_status`. CPU zero is reported only with offload disabled; Metal/CUDA unknown remains explicit null with retained native stderr, never inferred from requested layers. Added schema/code tests for explicit null and contradictory metadata.
+- [x] Added production template status/equivalence evidence. Exact and the one artifact-keyed reviewed Qwen triple score; unseen/missing/mismatched templates are refused before decode. No equivalence scope was widened.
+- [x] Added negative regressions for actual altered spacing, inserted BOS, and absolute-vs-chunk-local logits indexing without corrupting production.
+- [x] Ran the create-only offline Metal gate from the existing Qwen cache/build. Mandatory authored144 passed 144/144 exact prompt SHA-256, input token count, ordered option IDs, answer token IDs, all-slot boundaries, and finite readouts. Extended perturbations108 separately passed 108/108 exact fields.
+- [x] Retained full production row JSONL, one JSON stdout summary, reduced native stderr with original capture hash/size, and a report containing fixture/reference/output hashes, sizes, model/config, exact counts, numerical deltas, mismatch IDs, and reference/local margins.
+- [x] Astra accepted the measured pinned-backend/Q8_0 versus native-BF16 baseline: authored first-argmax 140/144 (0.972222), logit MAE/RMSE/max 0.534313/0.664228/2.543209, probability MAE/RMSE/max 0.023046/0.068618/0.513266; extended first-argmax 107/108. This is measured baseline evidence, not numerical equivalence and not proof of quantization-only causation; no 98% gate or other guessed tolerance applies.
+- [x] Parent/Astra approved corrected inference `cache_hit=false` semantics and final checks (78 workspace tests) for the M3 commit. The original 252 create-only rows stay unchanged, with their historical `cache_hit=true` defect explicitly annotated; their raw numerical fields remain the accepted baseline.
+
+Section 8 status after M3: architecture support, restricted templates, serialization, accelerator truth, and licensing decisions remain closed with runtime evidence. The safe-wrapper layer-count gap is explicitly nullable/statused rather than guessed. Shared/hybrid copy correctness is intentionally still an M5 runtime gate, not a hidden M3 question; CUDA remains build-instruction scope until its later device gate. There are no other unresolved M3 design questions.
 
 ## 9. Later (v2+)
 

@@ -18,8 +18,8 @@ pub use slots::{LETTERS, SlotTokenizer, VerifiedSlots, verify_slots};
 pub use types::{
     CONDITIONAL_PROBABILITY_LIMITATION, CONFIDENCE_STATUS, DIRECT_READOUT, Decision,
     DecisionOption, Device, ErrorDetail, ErrorRecord, ExecutionMetadata, ExecutionMode,
-    FORCED_TYPED_LIMITATION, GpuLayersRequested, Integrity, ModelMetadata, NativeReference,
-    OpenJevError, PROBABILITY_STATUS, Postprocess, Primitive, Question, RawSample, Readout,
-    SharedTiming, StateValue, standard_limitations,
+    FORCED_TYPED_LIMITATION, GpuLayersRequested, GpuLayersStatus, Integrity, ModelMetadata,
+    NativeReference, OpenJevError, PROBABILITY_STATUS, Postprocess, Primitive, Question, RawSample,
+    Readout, SharedTiming, StateValue, TemplateMetadataStatus, standard_limitations,
 };
 pub use validate::{MAX_JSON_DEPTH, parse_json_strict};

@@ -179,4 +179,50 @@ Final mutation-remediation commands all exited 0:
 - True CPU `GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu cargo clippy -p openjev-llama --features native --all-targets -- -D warnings` and matching feature test — 23 tests passed.
 - `git diff --check`; `git diff --exit-code -- reference` confirmed no reference changes.
 
-Per the focused review scope, the lengthy real-model CPU smokes were not rerun because engine/template code did not change; the existing create-only evidence above remains the M2 runtime record. No commit was created, no new target directory or download was used, and no M3/reference/workflow change was made. Final parent/Astra inspection: PASS. Verified canonical-parent traversal is checked before quarantine rename/unlink and receipt invalidation, separately from safe leaf-symlink removal, and that ownership boundaries are anchored to the canonical trusted root. Separate-Astra findings are resolved by targeted regressions, including unchanged outside sentinels and zero fetches. Independently reran fmt, workspace clippy with warnings denied, all 76 workspace tests, diff check and unchanged-reference check. M2 approved for commit; all six retained native smoke captures pass. M3 exact authored144 token/hash parity remains mandatory and unrun.
+Per the focused review scope, the lengthy real-model CPU smokes were not rerun because engine/template code did not change; the existing create-only evidence above remains the M2 runtime record. No commit was created, no new target directory or download was used, and no M3/reference/workflow change was made. Final parent/Astra inspection: PASS. Verified canonical-parent traversal is checked before quarantine rename/unlink and receipt invalidation, separately from safe leaf-symlink removal, and that ownership boundaries are anchored to the canonical trusted root. Separate-Astra findings are resolved by targeted regressions, including unchanged outside sentinels and zero fetches. Independently reran fmt, workspace clippy with warnings denied, all 76 workspace tests, diff check and unchanged-reference check. M2 approved for commit; all six retained native smoke captures pass. The statement that M3 was unrun is superseded by the section below; it remains accurate for the M2 commit itself.
+
+## M3 — production direct scoring and strict Qwen parity (reviewed and approved)
+
+Implemented the production owner-thread `EngineHandle::score_direct` request returning the complete validated core `Readout`. Every decision renders the restricted approved profile, tokenizes with no BOS, verifies all 2–16 slots and append boundaries, creates a clean context, performs exactly one prefill (chunked at `n_batch` when needed), retrieves the last chunk's local final index, copies native f32 logits before context destruction, and computes the f64 readout. There is no generation, truncation, implicit warmup, fallback, or borrowed logits escape. Because each call uses a fresh context/full prefill, direct inference `cache_hit` is now always `false`; the previous production code incorrectly copied artifact download-cache status into that field. Artifact cache status remains separate cache/runner metadata. M2 `smoke_direct` still performs its deliberate warmup plus measured pass.
+
+Added `EncodedPrompt`/`EngineHandle::encode_direct` and strict reference validation for integration gates, plus an explicit last-chunk-local index validator used by production. Negative tests use an actually spacing-mutated prompt, an inserted BOS token, and an absolute chunk index; all fail without altering the renderer or decode path. Per-decision validation/token checks occur before decode. Model cache bytes are verified at resolution and once again at worker load, never per row. Worker shutdown still joins after contexts/model/backend drop in owner-thread scope.
+
+Production metadata now reports exact artifact/native revisions, quantized/mixed dtype, backend/native commit, input/prompt/forward/total values, actual context/batch/thread/device configuration, and template status/evidence. The reviewed Qwen equivalence remains keyed to the exact artifact/GGUF/native template triple; missing or unseen template identities can still load for M2 diagnostics but production encoding/scoring refuses them before decode. The safe wrapper's actual layer-count gap is resolved honestly in the normative schema: `ExecutionMetadata.gpu_layers_actual` is `Option<u32>` and serializes explicit null, with required `gpu_layers_status`. CPU with zero/offload disabled reports `Some(0)/known-disabled`; Metal/CUDA safe-wrapper unknown reports `None/unavailable`, never the requested value. Core validation and JSON Schema tests cover legitimate unknown and reject contradictory status/count metadata.
+
+Added opt-in `m3_parity` and `m3_exact_gate` surfaces under `integration`; ordinary tests neither load nor download models. The create-only offline runner prevalidates all inputs/output paths, indexes 252 unique reference rows by ID, hard-gates authored144 and separately records perturbations108, writes full production Readout JSONL, and emits one JSON stdout summary while native/build logs go only to stderr.
+
+Actual Metal evidence using only `~/.cache/openjev` and `target-m2-metal`:
+
+- Integration encoded gate: 144/144 authored exact prompt hashes, input token counts, ordered option IDs, answer token IDs, and generic slot/boundary verification.
+- Production scoring gate: authored 144/144 exact hashes/tokens/IDs/slots and finite readouts; extended perturbations 108/108 exact on the same fields.
+- Authored native-BF16 versus local Q8_0: first argmax 140/144 (0.972222); logit MAE/RMSE/max 0.534313/0.664228/2.543209; probability MAE/RMSE/max 0.023046/0.068618/0.513266; four mismatch IDs and both margins retained.
+- Extended perturbations: 107/108 argmax agreement (0.990741); logit MAE/RMSE/max 0.565334/0.721156/2.591896; probability MAE/RMSE/max 0.014599/0.056621/0.542852; one mismatch retained.
+- Astra accepted 140/144 with logit MAE 0.534313, and the extended 107/108 result, as the measured pinned-backend/Q8_0 versus native-BF16 baseline. This is not a numerical-equivalence claim and does not attribute the delta solely to quantization. No 98% acceptance gate or other guessed tolerance applies.
+
+Retained create-only files and hashes are documented in `docs/RESULTS.md`. The full raw native stderr was reduced after recording its SHA-256/line/byte count, matching the M2 evidence policy. No reference file changed, model downloaded, new native target directory created, or M4/M5/M6/M7 behavior implemented.
+
+Original full M3 pre-review checks, all exit 0:
+
+- `cargo fmt --all` and `cargo fmt --all -- --check`.
+- `cargo check --workspace`.
+- `cargo clippy --workspace --all-targets -- -D warnings`.
+- `cargo test --workspace` — 77 tests passed (4 CLI, 50 core unit/integration, 23 backend registry/cache), 0 failed; the feature-gated M3 integration test compiled as zero default tests.
+- Default-member `cargo clippy --all-targets -- -D warnings` and `cargo test` — 54 tests passed (4 CLI, 50 core), 0 failed.
+- Metal `GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal cargo clippy -p openjev-llama --features metal,integration --all-targets -- -D warnings` and matching feature test — 25 backend tests passed; integration test was environment-gated in this ordinary feature run.
+- True CPU `GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu cargo clippy -p openjev-llama --features native,integration --all-targets -- -D warnings` and matching feature test — 25 backend tests passed; integration test was environment-gated.
+- Explicit Metal encoded integration gate with `OPENJEV_INTEGRATION=1` — 144 authored rows passed in 42.98 seconds.
+- Full create-only Metal production report runner with `OPENJEV_INTEGRATION=1` — authored144 and perturbations108 both passed exact gates; quantitative results retained.
+- Selected offline Qwen M2 smoke after M3 changes — passed and retained distinct nonnegative warmup/measured times (0.049901/0.045627 seconds), confirming the two-pass diagnostic behavior remains; temporary smoke output was not added as new milestone evidence.
+
+Targeted `cache_hit` remediation checks also all exited 0 with `CARGO_NET_OFFLINE=true`:
+
+- `cargo fmt --all`, `cargo fmt --all -- --check`, and `cargo check --workspace`.
+- `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` — 78 tests passed (4 CLI, 50 core, 24 default backend/cache/registry), including the model-free cached-artifact/repeated-direct metadata regression.
+- Default-member `cargo clippy --all-targets -- -D warnings` and `cargo test` — 54 tests passed (4 CLI, 50 core).
+- Existing Metal target: `GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal cargo clippy -p openjev-llama --features metal,integration --all-targets -- -D warnings` and matching feature test — 26 unit tests passed; the integration surface returned immediately because `OPENJEV_INTEGRATION` was unset.
+- Existing true-CPU target: `GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu cargo clippy -p openjev-llama --features native,integration --all-targets -- -D warnings` and matching feature test — 26 unit tests passed; the integration surface returned immediately because `OPENJEV_INTEGRATION` was unset.
+- `git diff --check` and `git diff --exit-code -- reference`.
+
+No model was resolved, loaded, or downloaded during these checks. The lengthy numerical benchmark was deliberately not rerun; retained artifact hashes/sizes still match the documented originals.
+
+Final parent/Astra adjudication: PASS. Confirmed production construction uses only `direct_inference_cache_hit()` returning `Some(false)` and no artifact-cache state; the report runner rejects contrary direct metadata. The model-free regression exercises the production helper, not native inference; no extra native rerun is claimed. Independently reran fmt, workspace clippy with warnings denied, all 78 workspace tests, diff/reference checks. Separate-Astra numerical acceptance and the independently recomputed 144/144 + 108/108 exact fields remain unchanged. M3 approved for milestone commit. The 252 create-only rows remain unchanged with the historical `cache_hit=true` defect annotated in `docs/RESULTS.md`; their raw logits and accepted numerical baseline are unaffected.

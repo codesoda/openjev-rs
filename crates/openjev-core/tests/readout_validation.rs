@@ -2,9 +2,9 @@ use std::{fs, path::Path};
 
 use openjev_core::{
     CONFIDENCE_STATUS, DIRECT_READOUT, Device, ExecutionMetadata, ExecutionMode,
-    GpuLayersRequested, Integrity, ModelMetadata, PROBABILITY_STATUS, Postprocess, Primitive,
-    PromptProfile, RawSample, Readout, SharedTiming, normalized_margin, read_logits,
-    standard_limitations,
+    GpuLayersRequested, GpuLayersStatus, Integrity, ModelMetadata, PROBABILITY_STATUS, Postprocess,
+    Primitive, PromptProfile, RawSample, Readout, SharedTiming, TemplateMetadataStatus,
+    normalized_margin, read_logits, standard_limitations,
 };
 
 type Mutation = (fn(&mut Readout), bool);
@@ -17,7 +17,8 @@ fn execution() -> ExecutionMetadata {
         device: Device::Cpu,
         device_name: "test-cpu".to_owned(),
         gpu_layers_requested: GpuLayersRequested::Count(0),
-        gpu_layers_actual: 0,
+        gpu_layers_actual: Some(0),
+        gpu_layers_status: GpuLayersStatus::KnownDisabled,
         threads: 1,
         n_ctx_requested: None,
         n_ctx_actual: 4096,
@@ -47,7 +48,9 @@ fn model() -> ModelMetadata {
         native_reference: None,
         template_profile: PromptProfile::Qwen3,
         template_sha256: None,
-        template_override: false,
+        template_override: true,
+        template_status: TemplateMetadataStatus::OverrideUnverified,
+        template_equivalence_evidence: None,
         serving_config: Some("llama-direct-v1".to_owned()),
         adapter: None,
         adapter_sha256: None,
@@ -170,6 +173,23 @@ fn rejects_contract_and_primitive_mutations() {
     bad_score.argmax_level = Some("a".to_owned());
     bad_score.p_yes = Some(0.5);
     assert!(bad_score.validate().is_err());
+}
+
+#[test]
+fn accelerator_actual_layers_can_be_explicitly_unknown_but_never_inferred() {
+    let mut readout = valid_readout();
+    readout.execution.device = Device::Metal;
+    readout.execution.device_name = "MTL0: test".to_owned();
+    readout.execution.gpu_layers_requested = GpuLayersRequested::All;
+    readout.execution.gpu_layers_actual = None;
+    readout.execution.gpu_layers_status = GpuLayersStatus::Unavailable;
+    readout.validate().unwrap();
+    let json = serde_json::to_value(&readout).unwrap();
+    assert!(json["execution"]["gpu_layers_actual"].is_null());
+    assert_eq!(json["execution"]["gpu_layers_status"], "unavailable");
+
+    readout.execution.gpu_layers_actual = Some(0);
+    assert!(readout.validate().is_err());
 }
 
 #[test]

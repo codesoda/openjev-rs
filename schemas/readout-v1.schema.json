@@ -16,7 +16,7 @@
     "Probabilities": {"type":"array","minItems":2,"maxItems":16,"items":{"$ref":"#/$defs/Probability"}},
     "ModelMetadata": {
       "type":"object","additionalProperties":false,
-      "required":["id","source","revision","file","quant","backend","artifact_sha256","integrity","dtype","template_profile","template_sha256","template_override"],
+      "required":["id","source","revision","file","quant","backend","artifact_sha256","integrity","dtype","template_profile","template_sha256","template_override","template_status","template_equivalence_evidence"],
       "properties": {
         "id":{"type":"string"},"source":{"type":"string"},"revision":{"type":"string"},"file":{"type":"string"},
         "quant":{"type":"string"},"backend":{"type":"string"},"artifact_sha256":{"$ref":"#/$defs/Hash"},
@@ -24,7 +24,9 @@
         "native_reference":{"type":"object","additionalProperties":false,"required":["source","revision","dtype"],"properties":{"source":{"type":"string"},"revision":{"type":"string","pattern":"^[0-9a-f]{40}$"},"dtype":{"const":"bfloat16"}}},
         "template_profile":{"$ref":"#/$defs/Profile"},
         "template_sha256":{"anyOf":[{"$ref":"#/$defs/Hash"},{"type":"null"}]},
-        "template_override":{"type":"boolean"},"serving_config":{"type":"string"},
+        "template_override":{"type":"boolean"},
+        "template_status":{"enum":["exact","reviewed-equivalent","override-unverified"]},
+        "template_equivalence_evidence":{"type":["string","null"]},"serving_config":{"type":"string"},
         "adapter":{"type":["string","null"]},
         "adapter_sha256":{"anyOf":[{"$ref":"#/$defs/Hash"},{"type":"null"}]},
         "adapter_revision":{"type":["string","null"]},"torch_version":{"type":"string"},"transformers_version":{"type":"string"}
@@ -32,12 +34,13 @@
     },
     "ExecutionMetadata": {
       "type":"object","additionalProperties":false,
-      "required":["requested_mode","effective_mode","fallback_reason","device","device_name","gpu_layers_requested","gpu_layers_actual","threads","n_ctx_requested","n_ctx_actual","max_tokens","n_batch","n_ubatch","n_seq_max","kv_unified","waves","probe_id","run_id"],
+      "required":["requested_mode","effective_mode","fallback_reason","device","device_name","gpu_layers_requested","gpu_layers_actual","gpu_layers_status","threads","n_ctx_requested","n_ctx_actual","max_tokens","n_batch","n_ubatch","n_seq_max","kv_unified","waves","probe_id","run_id"],
       "properties": {
         "requested_mode":{"$ref":"#/$defs/Mode"},"effective_mode":{"$ref":"#/$defs/Mode"},
         "fallback_reason":{"type":["string","null"]},"device":{"enum":["cpu","metal","cuda"]},"device_name":{"type":"string"},
         "gpu_layers_requested":{"anyOf":[{"const":"all"},{"type":"integer","minimum":0}]},
-        "gpu_layers_actual":{"type":"integer","minimum":0},"threads":{"$ref":"#/$defs/PositiveInt"},
+        "gpu_layers_actual":{"anyOf":[{"type":"integer","minimum":0},{"type":"null"}]},
+        "gpu_layers_status":{"enum":["reported","known-disabled","unavailable"]},"threads":{"$ref":"#/$defs/PositiveInt"},
         "n_ctx_requested":{"anyOf":[{"$ref":"#/$defs/PositiveInt"},{"type":"null"}]},
         "n_ctx_actual":{"$ref":"#/$defs/PositiveInt"},"max_tokens":{"$ref":"#/$defs/PositiveInt"},
         "n_batch":{"$ref":"#/$defs/PositiveInt"},"n_ubatch":{"$ref":"#/$defs/PositiveInt"},"n_seq_max":{"$ref":"#/$defs/PositiveInt"},

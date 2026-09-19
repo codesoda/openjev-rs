@@ -1,0 +1,26 @@
+# Reduced native stderr evidence for M3 Metal parity run
+# Full raw capture SHA-256: e16cd68caf5850d3aa5e9028940f10071be2c01c903190d0696da9db2752fe55
+# Full raw capture: 10,976 lines / 1,272,075 bytes
+# Reduction removes repeated per-row context allocation logs. Row-level timings and
+# execution metadata are retained in the prediction JSONL files.
+
+   Compiling openjev-llama v0.1.0 (/Users/chrisraethke/projects/openjev-rs/crates/openjev-llama)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.69s
+     Running `target-m2-metal/debug/examples/m3_parity --device metal --authored-output docs/results/m3-qwen3-metal-authored144.predictions.jsonl --perturbations-output docs/results/m3-qwen3-metal-perturbations108.predictions.jsonl --report docs/results/m3-qwen3-metal-report.json`
+2026-09-19T08:38:53.830054Z  INFO init: llama-cpp-2: GPU name:   MTL0 (Apple M3 Pro) module="ggml::ggml_metal_device_init"
+2026-09-19T08:38:53.830118Z  INFO init: llama-cpp-2: has unified memory    = true module="ggml::ggml_metal_device_init"
+2026-09-19T08:38:53.830127Z  INFO init: llama-cpp-2: has bfloat            = true module="ggml::ggml_metal_device_init"
+2026-09-19T08:38:53.871283Z  INFO load_from_file: llama-cpp-2: loaded meta data with 28 key-value pairs and 310 tensors from /Users/chrisraethke/.cache/openjev/hub/models--Qwen--Qwen3-0.6B-GGUF/snapshots/23749fefcc72300e3a2ad315e1317431b06b590a/Qwen3-0.6B-Q8_0.gguf (version GGUF V3 (latest)) module="llama.cpp::llama_model_loader"
+2026-09-19T08:38:53.923418Z  INFO load_from_file: llama-cpp-2: - type  f32:  113 tensors module="llama.cpp::llama_model_loader"
+2026-09-19T08:38:53.923453Z  INFO load_from_file: llama-cpp-2: - type q8_0:  197 tensors module="llama.cpp::llama_model_loader"
+2026-09-19T08:38:53.923490Z  INFO load_from_file: llama-cpp-2: file type   = Q8_0 module="llama.cpp::print_info"
+2026-09-19T08:38:53.923509Z  INFO load_from_file: llama-cpp-2: file size   = 604.15 MiB (8.50 BPW)  module="llama.cpp::print_info"
+2026-09-19T08:38:54.047108Z  INFO load_from_file: llama-cpp-2: n_ctx_train           = 40960 module="llama.cpp::print_info"
+2026-09-19T08:38:54.105775Z  INFO load_from_file: llama-cpp-2: offloaded 29/29 layers to GPU module="llama.cpp::load_tensors"
+2026-09-19T08:38:54.107934Z  INFO openjev_llama::engine: loaded pinned GGUF model=qwen3-0.6b architecture=qwen3 n_ctx_train=40960 template_sha256=Some("57f1fd00f0013a2be96aa79b857391f27e23df5b5f847072b524c897e24d0361") template_status=ReviewedEquivalent load_seconds=0.275949292
+2026-09-19T08:38:54.110277Z  INFO llama-cpp-2: n_ctx                 = 4096 module="llama.cpp::llama_context"
+2026-09-19T08:38:54.110293Z  INFO llama-cpp-2: n_ctx_seq             = 4096 module="llama.cpp::llama_context"
+2026-09-19T08:38:54.110309Z  INFO llama-cpp-2: n_batch               = 512 module="llama.cpp::llama_context"
+2026-09-19T08:38:54.110323Z  INFO llama-cpp-2: n_ubatch              = 512 module="llama.cpp::llama_context"
+# The same clean direct context policy was repeated for every 144 authored and
+# 108 perturbation decision; no generation or warmup pass occurred per row.

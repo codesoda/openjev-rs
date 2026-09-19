@@ -157,8 +157,8 @@ fn ensure_alignment(decision: &Decision, readout: &Readout) -> Result<()> {
 mod tests {
     use super::*;
     use crate::{
-        Device, ExecutionMetadata, ExecutionMode, GpuLayersRequested, Integrity, ModelMetadata,
-        PromptProfile,
+        Device, ExecutionMetadata, ExecutionMode, GpuLayersRequested, GpuLayersStatus, Integrity,
+        ModelMetadata, PromptProfile, TemplateMetadataStatus,
     };
 
     fn readout(id: &str, option_ids: Vec<String>, probabilities: Vec<f64>) -> Readout {
@@ -192,7 +192,9 @@ mod tests {
                 native_reference: None,
                 template_profile: PromptProfile::Qwen3,
                 template_sha256: None,
-                template_override: false,
+                template_override: true,
+                template_status: TemplateMetadataStatus::OverrideUnverified,
+                template_equivalence_evidence: None,
                 serving_config: None,
                 adapter: None,
                 adapter_sha256: None,
@@ -213,7 +215,8 @@ mod tests {
                 device: Device::Cpu,
                 device_name: "test".to_owned(),
                 gpu_layers_requested: GpuLayersRequested::Count(0),
-                gpu_layers_actual: 0,
+                gpu_layers_actual: Some(0),
+                gpu_layers_status: GpuLayersStatus::KnownDisabled,
                 threads: 1,
                 n_ctx_requested: None,
                 n_ctx_actual: 1,

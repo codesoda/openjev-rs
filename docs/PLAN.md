@@ -103,7 +103,7 @@ S build.rs was read completely before proposing any workaround:
 - :701 onward controls `GGML_NATIVE`; :987–993 enables CUDA (`GGML_CUDA=ON`, NCCL off); :1047–1050 controls OpenMP by feature.
 - Metal feature exists but this build.rs has no corresponding `cfg!(feature="metal")` switch. S `llama.cpp/ggml/CMakeLists.txt:95–100,238` defaults Metal ON on Apple. Do not equate `--no-default-features` with CPU-only on macOS.
 - CPU-only Mac build: `GGML_METAL=OFF`, separate target directory, `--no-default-features --features native`; runtime zero GPU layers **and** op/KV offload disabled. Metal build: `GGML_METAL=ON`, `--features metal`; inspect CMake cache and actual runtime device logs. CUDA: `--features cuda`, toolkit/driver and pinned CUDA arch configuration recorded. No all-features CI combining incompatible accelerators.
-- Use available-parallelism threads (bounded positive i32) by default; CLI overrides both generation/prefill thread settings. `n_batch=512`, `n_ubatch=512` initial defaults, benchmark before tuning. Full-layer offload requests `with_n_gpu_layers(u32::MAX)`, CPU requests 0; R `src/model/params.rs:517–522` converts overflow to i32::MAX. Retain actual offloaded layers in metadata.
+- Use available-parallelism threads (bounded positive i32) by default; CLI overrides both generation/prefill thread settings. `n_batch=512`, `n_ubatch=512` initial defaults, benchmark before tuning. Full-layer offload requests `with_n_gpu_layers(u32::MAX)`, CPU requests 0; R `src/model/params.rs:517–522` converts overflow to i32::MAX. Retain the safe-wrapper actual count when available; otherwise emit explicit null/status and preserve native stderr evidence, never infer actual from requested.
 - Require Xcode command-line tools, CMake, C/C++ compiler and libclang for bindgen. Record build environment. Do not force deployment targets, SDK paths, compiler or linkage environment variables without a reproduced need.
 
 ## 4. Workspace and public API
@@ -231,7 +231,7 @@ Shared eligibility is opt-in via a successful M5 probe record keyed by artifact 
 
 ## 7. Output schema (complete v1 readout superset)
 
-This is a normative schema definition for M1's machine-readable JSON Schema export. Notation: `?` means optional/omitted, `T|null` permits explicit null, `[]` means array. No unexplained fields or NaN/Infinity; output struct serialization uses these exact snake_case names. Importers allow extra upstream metadata for compatibility. All vector lengths equal K and all indices/choices agree with option_ids, checked in code in addition to schema. This superset preserves every direct, serial, shared and browser-ladder readout field; unavailable measurements are omitted, never fabricated as zero.
+This is a normative schema definition for M1's machine-readable JSON Schema export. Notation: `?` means optional/omitted, `T|null` permits explicit null, `[]` means array. No unexplained fields or NaN/Infinity; output struct serialization uses these exact snake_case names. Importers allow extra upstream metadata for compatibility. All vector lengths equal K and all indices/choices agree with option_ids, checked in code in addition to schema. This superset preserves every direct, serial, shared and browser-ladder readout field; unavailable optional measurements are omitted, while the required actual GPU-layer count uses explicit null plus status when the safe wrapper cannot report it, never a fabricated zero.
 
 ```
 Readout {
@@ -280,6 +280,8 @@ ModelMetadata {
   template_profile: "qwen3"|"qwen3.5"|"minicpm5",
   template_sha256: hex[64]|null,
   template_override: boolean,
+  template_status: "exact"|"reviewed-equivalent"|"override-unverified",
+  template_equivalence_evidence: string|null,
   serving_config?: string,
   adapter?: string|null, adapter_sha256?: hex[64]|null,
   adapter_revision?: string|null,
@@ -291,7 +293,8 @@ ExecutionMetadata {
   fallback_reason: string|null,
   device: "cpu"|"metal"|"cuda", device_name:string,
   gpu_layers_requested: string|nonnegative integer,
-  gpu_layers_actual: nonnegative integer,
+  gpu_layers_actual: nonnegative integer|null,
+  gpu_layers_status: "reported"|"known-disabled"|"unavailable",
   threads: positive integer, n_ctx_requested: positive integer|null,
   n_ctx_actual: positive integer, max_tokens:positive integer,
   n_batch:positive integer, n_ubatch:positive integer, n_seq_max:positive integer,
@@ -333,9 +336,11 @@ ErrorRecord {
 }
 ```
 
+The safe llama wrapper does not expose the actual offloaded-layer count. Therefore `gpu_layers_actual` is explicitly nullable: CPU with native offload disabled reports `0` and `known-disabled`; an accelerator request whose actual count is only visible in native stderr reports `null` and `unavailable`, never inferred from the requested count. A future safe count API may report an integer with `reported`. `template_status` and artifact-keyed `template_equivalence_evidence` distinguish exact templates from the narrowly reviewed Qwen equivalence; production scoring rejects missing/mismatched unapproved templates.
+
 `readout` for actual direct/serial-full-prompt/batch rows is exactly `native full-vocabulary last-position logits restricted to declared answer slots`; actual shared rows use exactly Python shared's `native selected suffix-position logits`. Import schema also accepts historical `native-state-prefix-cache-last-position` (Python serial) and `native-full-vocabulary-last-position` (ladder), but we never claim those execution paths if not used. `serving_config` uses Rust-specific `llama-direct-v1`, `llama-serial-full-prompt-v1`, `llama-state-prefix-parallel-v1`, `llama-independent-batch-v1`, not misleading native PyTorch identifiers. Imported Torch/Transformers/adapter metadata is retained; our own outputs omit inapplicable versions. `backend` includes both `llama-cpp-2/0.1.156` and full llama.cpp commit.
 
-Prefix hash, if emitted, is SHA-256 of Python `json.dumps(prefix_token_ids)` bytes (comma-space list), matching serial.py, not a text-prefix hash. `cache_hit=false` describes fresh prefill; do not invent a cross-request hit. Result time fields are mode-appropriate as described in section 6.
+Prefix hash, if emitted, is SHA-256 of Python `json.dumps(prefix_token_ids)` bytes (comma-space list), matching serial.py, not a text-prefix hash. Readout `cache_hit` means inference prefix reuse only: `cache_hit=false` describes fresh prefill, and artifact download-cache reuse remains separate cache/runner metadata. Do not invent a cross-request hit. Result time fields are mode-appropriate as described in section 6.
 
 Postprocessing changes `probabilities`, `choice`, primitive expectations and confidence, not base-run raw prompt/logit/vocabulary fields. Presence of postprocess makes this distinction explicit: `raw_fields_reference=0` points to the identity permutation sample and every other sample carries its own prompt hash/tokens/logits/timings. For transformed single-row operations, top-level total_seconds measures the entire operation and forward_seconds sums its model work; per-sample timings remain available. Shared transformed groups retain group-level timing instead of fabricated row timings. A transformation is **not** a pure direct baseline. Keep `prompt_version=direct-options-v1` because the per-run prompt algorithm is unchanged; version the postprocess separately. Never present averaged logits or a synthetic hash as if they came from a single forward pass.
 
@@ -446,7 +451,7 @@ The following Draft 2020-12 schema is the M1 export source (documentation, not i
     "Probabilities": {"type":"array","minItems":2,"maxItems":16,"items":{"$ref":"#/$defs/Probability"}},
     "ModelMetadata": {
       "type":"object","additionalProperties":false,
-      "required":["id","source","revision","file","quant","backend","artifact_sha256","integrity","dtype","template_profile","template_sha256","template_override"],
+      "required":["id","source","revision","file","quant","backend","artifact_sha256","integrity","dtype","template_profile","template_sha256","template_override","template_status","template_equivalence_evidence"],
       "properties": {
         "id":{"type":"string"},"source":{"type":"string"},"revision":{"type":"string"},"file":{"type":"string"},
         "quant":{"type":"string"},"backend":{"type":"string"},"artifact_sha256":{"$ref":"#/$defs/Hash"},
@@ -454,7 +459,9 @@ The following Draft 2020-12 schema is the M1 export source (documentation, not i
         "native_reference":{"type":"object","additionalProperties":false,"required":["source","revision","dtype"],"properties":{"source":{"type":"string"},"revision":{"type":"string","pattern":"^[0-9a-f]{40}$"},"dtype":{"const":"bfloat16"}}},
         "template_profile":{"$ref":"#/$defs/Profile"},
         "template_sha256":{"anyOf":[{"$ref":"#/$defs/Hash"},{"type":"null"}]},
-        "template_override":{"type":"boolean"},"serving_config":{"type":"string"},
+        "template_override":{"type":"boolean"},
+        "template_status":{"enum":["exact","reviewed-equivalent","override-unverified"]},
+        "template_equivalence_evidence":{"type":["string","null"]},"serving_config":{"type":"string"},
         "adapter":{"type":["string","null"]},
         "adapter_sha256":{"anyOf":[{"$ref":"#/$defs/Hash"},{"type":"null"}]},
         "adapter_revision":{"type":["string","null"]},"torch_version":{"type":"string"},"transformers_version":{"type":"string"}
@@ -462,12 +469,13 @@ The following Draft 2020-12 schema is the M1 export source (documentation, not i
     },
     "ExecutionMetadata": {
       "type":"object","additionalProperties":false,
-      "required":["requested_mode","effective_mode","fallback_reason","device","device_name","gpu_layers_requested","gpu_layers_actual","threads","n_ctx_requested","n_ctx_actual","max_tokens","n_batch","n_ubatch","n_seq_max","kv_unified","waves","probe_id","run_id"],
+      "required":["requested_mode","effective_mode","fallback_reason","device","device_name","gpu_layers_requested","gpu_layers_actual","gpu_layers_status","threads","n_ctx_requested","n_ctx_actual","max_tokens","n_batch","n_ubatch","n_seq_max","kv_unified","waves","probe_id","run_id"],
       "properties": {
         "requested_mode":{"$ref":"#/$defs/Mode"},"effective_mode":{"$ref":"#/$defs/Mode"},
         "fallback_reason":{"type":["string","null"]},"device":{"enum":["cpu","metal","cuda"]},"device_name":{"type":"string"},
         "gpu_layers_requested":{"anyOf":[{"const":"all"},{"type":"integer","minimum":0}]},
-        "gpu_layers_actual":{"type":"integer","minimum":0},"threads":{"$ref":"#/$defs/PositiveInt"},
+        "gpu_layers_actual":{"anyOf":[{"type":"integer","minimum":0},{"type":"null"}]},
+        "gpu_layers_status":{"enum":["reported","known-disabled","unavailable"]},"threads":{"$ref":"#/$defs/PositiveInt"},
         "n_ctx_requested":{"anyOf":[{"$ref":"#/$defs/PositiveInt"},{"type":"null"}]},
         "n_ctx_actual":{"$ref":"#/$defs/PositiveInt"},"max_tokens":{"$ref":"#/$defs/PositiveInt"},
         "n_batch":{"$ref":"#/$defs/PositiveInt"},"n_ubatch":{"$ref":"#/$defs/PositiveInt"},"n_seq_max":{"$ref":"#/$defs/PositiveInt"},

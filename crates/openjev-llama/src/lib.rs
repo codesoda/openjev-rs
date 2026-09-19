@@ -21,7 +21,8 @@ pub use registry::{ModelEntry, ModelRegistry, NativeReferenceSpec, TemplateEquiv
 
 #[cfg(feature = "native")]
 pub use engine::{
-    DirectSmokeReport, EngineHandle, EngineOptions, LoadedModelInfo, RuntimeDevice, TemplateStatus,
+    DirectSmokeReport, EncodedPrompt, EngineHandle, EngineOptions, LoadedModelInfo, RuntimeDevice,
+    TemplateStatus, validate_final_chunk_local_index,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,6 +142,30 @@ pub const fn compiled_backend_feature() -> BackendFeature {
 
 pub fn unavailable() -> Result<()> {
     Err(BackendError::Unavailable)
+}
+
+/// Direct scoring creates a fresh context and prefills the complete prompt.
+/// Artifact download-cache status is separate runner/cache metadata and must not
+/// be reported as inference prefix reuse.
+#[cfg(any(feature = "native", test))]
+pub(crate) const fn direct_inference_cache_hit() -> Option<bool> {
+    Some(false)
+}
+
+#[cfg(test)]
+mod readout_cache_semantics_tests {
+    use super::direct_inference_cache_hit;
+
+    #[test]
+    fn cached_artifact_does_not_make_repeated_direct_readouts_cache_hits() {
+        let artifact_cache_hit = true;
+        assert!(
+            artifact_cache_hit,
+            "fixture represents a cached GGUF artifact"
+        );
+        assert_eq!(direct_inference_cache_hit(), Some(false));
+        assert_eq!(direct_inference_cache_hit(), Some(false));
+    }
 }
 
 #[cfg(all(test, not(feature = "native")))]

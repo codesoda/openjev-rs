@@ -361,6 +361,22 @@ pub enum GpuLayersRequested {
     Count(u32),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GpuLayersStatus {
+    Reported,
+    KnownDisabled,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TemplateMetadataStatus {
+    Exact,
+    ReviewedEquivalent,
+    OverrideUnverified,
+}
+
 impl Serialize for GpuLayersRequested {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -425,6 +441,8 @@ pub struct ModelMetadata {
     pub template_profile: crate::prompt::PromptProfile,
     pub template_sha256: Option<String>,
     pub template_override: bool,
+    pub template_status: TemplateMetadataStatus,
+    pub template_equivalence_evidence: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serving_config: Option<String>,
     pub adapter: Option<String>,
@@ -458,6 +476,41 @@ impl ModelMetadata {
         if let Some(hash) = &self.adapter_sha256 {
             check_hash(hash, &format!("{path}.adapter_sha256"))?;
         }
+        match self.template_status {
+            TemplateMetadataStatus::Exact => {
+                if self.template_sha256.is_none()
+                    || self.template_override
+                    || self.template_equivalence_evidence.is_some()
+                {
+                    return validation(
+                        &format!("{path}.template_status"),
+                        "exact template metadata requires a hash, no override, and no equivalence evidence",
+                    );
+                }
+            }
+            TemplateMetadataStatus::ReviewedEquivalent => {
+                if self.template_sha256.is_none()
+                    || self.template_override
+                    || self
+                        .template_equivalence_evidence
+                        .as_ref()
+                        .is_none_or(String::is_empty)
+                {
+                    return validation(
+                        &format!("{path}.template_status"),
+                        "reviewed-equivalent metadata requires a hash and nonempty evidence without an override",
+                    );
+                }
+            }
+            TemplateMetadataStatus::OverrideUnverified => {
+                if !self.template_override || self.template_equivalence_evidence.is_some() {
+                    return validation(
+                        &format!("{path}.template_status"),
+                        "override-unverified metadata requires an explicit override and no equivalence evidence",
+                    );
+                }
+            }
+        }
         if (self.adapter_sha256.is_some() || self.adapter_revision.is_some())
             && self.adapter.is_none()
         {
@@ -485,7 +538,8 @@ pub struct ExecutionMetadata {
     pub device: Device,
     pub device_name: String,
     pub gpu_layers_requested: GpuLayersRequested,
-    pub gpu_layers_actual: u32,
+    pub gpu_layers_actual: Option<u32>,
+    pub gpu_layers_status: GpuLayersStatus,
     pub threads: u32,
     pub n_ctx_requested: Option<u32>,
     pub n_ctx_actual: u32,
@@ -527,6 +581,35 @@ impl ExecutionMetadata {
         }
         if self.device_name.is_empty() || self.run_id.is_empty() {
             return validation(path, "device_name and run_id must be nonempty");
+        }
+        match self.gpu_layers_status {
+            GpuLayersStatus::KnownDisabled => {
+                if self.device != Device::Cpu
+                    || self.gpu_layers_requested != GpuLayersRequested::Count(0)
+                    || self.gpu_layers_actual != Some(0)
+                {
+                    return validation(
+                        &format!("{path}.gpu_layers_status"),
+                        "known-disabled requires CPU, requested zero, and actual zero",
+                    );
+                }
+            }
+            GpuLayersStatus::Unavailable => {
+                if self.gpu_layers_actual.is_some() {
+                    return validation(
+                        &format!("{path}.gpu_layers_actual"),
+                        "unavailable actual layer count must be null",
+                    );
+                }
+            }
+            GpuLayersStatus::Reported => {
+                if self.gpu_layers_actual.is_none() {
+                    return validation(
+                        &format!("{path}.gpu_layers_actual"),
+                        "reported actual layer count must be an integer",
+                    );
+                }
+            }
         }
         if self.group_id.as_ref().is_some_and(String::is_empty) {
             return validation(&format!("{path}.group_id"), "group_id must be nonempty");

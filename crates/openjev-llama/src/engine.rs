@@ -1,7 +1,10 @@
 use std::{
     fmt::Write as _,
     num::NonZeroU32,
-    sync::mpsc::{Receiver, SyncSender, sync_channel},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc::{Receiver, SyncSender, sync_channel},
+    },
     thread::JoinHandle,
     time::Instant,
 };
@@ -15,8 +18,10 @@ use llama_cpp_2::{
     token::LlamaToken,
 };
 use openjev_core::{
-    Decision, Device, GpuLayersRequested, NumericReadout, PromptProfile, SlotTokenizer,
-    prepare_prompt, read_logits, verify_slots,
+    DIRECT_READOUT, Decision, Device, ExecutionMetadata, ExecutionMode, GpuLayersRequested,
+    GpuLayersStatus, Integrity, ModelMetadata, NativeReference, NumericReadout, PROBABILITY_STATUS,
+    Primitive, PromptProfile, Readout, SlotTokenizer, TemplateMetadataStatus, prepare_prompt,
+    read_logits, standard_limitations, verify_slots,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -24,6 +29,7 @@ use sha2::{Digest, Sha256};
 use crate::{BackendError, ModelEntry, Result, VerifiedArtifact, cache::hash_file};
 
 const LLAMA_CPP_COMMIT: &str = "e79e4bf660e19f2ad851e06c6913f7a8c5852621";
+static RUN_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug)]
 pub struct EngineOptions {
@@ -141,7 +147,57 @@ pub struct LoadedModelInfo {
     pub device_requested: Device,
     pub gpu_layers_requested: GpuLayersRequested,
     pub gpu_layers_actual: Option<u32>,
+    pub gpu_layers_status: GpuLayersStatus,
     pub runtime_devices: Vec<RuntimeDevice>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EncodedPrompt {
+    pub id: String,
+    pub prompt_sha256: String,
+    pub prompt_version: String,
+    pub option_ids: Vec<String>,
+    pub prompt_token_ids: Vec<u32>,
+    pub answer_token_ids: Vec<u32>,
+}
+
+impl EncodedPrompt {
+    /// Fail closed on any strict reference-field mismatch.
+    pub fn validate_reference(
+        &self,
+        expected_id: &str,
+        expected_option_ids: &[String],
+        expected_prompt_sha256: &str,
+        expected_input_tokens: usize,
+        expected_answer_token_ids: &[u32],
+    ) -> Result<()> {
+        let mismatch = if self.id != expected_id {
+            Some(format!("id {:?} != {expected_id:?}", self.id))
+        } else if self.option_ids != expected_option_ids {
+            Some("option_ids differ".to_owned())
+        } else if self.prompt_sha256 != expected_prompt_sha256 {
+            Some(format!(
+                "prompt_sha256 {} != {expected_prompt_sha256}",
+                self.prompt_sha256
+            ))
+        } else if self.prompt_token_ids.len() != expected_input_tokens {
+            Some(format!(
+                "input_tokens {} != {expected_input_tokens}",
+                self.prompt_token_ids.len()
+            ))
+        } else if self.answer_token_ids != expected_answer_token_ids {
+            Some("answer_token_ids differ".to_owned())
+        } else {
+            None
+        };
+        if let Some(message) = mismatch {
+            Err(BackendError::Core(format!(
+                "strict parity mismatch for {expected_id:?}: {message}"
+            )))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -175,6 +231,14 @@ struct DirectPass {
 }
 
 enum Request {
+    Encode {
+        decision: Box<Decision>,
+        response: SyncSender<Result<EncodedPrompt>>,
+    },
+    Score {
+        decision: Box<Decision>,
+        response: SyncSender<Result<Readout>>,
+    },
     Smoke {
         decision: Box<Decision>,
         response: SyncSender<Result<DirectSmokeReport>>,
@@ -226,6 +290,38 @@ impl EngineHandle {
         &self.info
     }
 
+    /// Render and verify the complete no-BOS prompt and every declared answer slot.
+    ///
+    /// This performs no decode and is exposed for strict integration gates. Production
+    /// scoring performs the same checks again as part of its one-prefill decision path.
+    pub fn encode_direct(&self, decision: Decision) -> Result<EncodedPrompt> {
+        let (sender, receiver) = sync_channel(1);
+        self.sender
+            .send(Request::Encode {
+                decision: Box::new(decision),
+                response: sender,
+            })
+            .map_err(|_| BackendError::Worker("owner thread is unavailable".to_owned()))?;
+        receiver
+            .recv()
+            .map_err(|_| BackendError::Worker("owner thread dropped its response".to_owned()))?
+    }
+
+    /// Score one validated decision with exactly one prompt prefill (possibly chunked).
+    pub fn score_direct(&self, decision: Decision) -> Result<Readout> {
+        let (sender, receiver) = sync_channel(1);
+        self.sender
+            .send(Request::Score {
+                decision: Box::new(decision),
+                response: sender,
+            })
+            .map_err(|_| BackendError::Worker("owner thread is unavailable".to_owned()))?;
+        receiver
+            .recv()
+            .map_err(|_| BackendError::Worker("owner thread dropped its response".to_owned()))?
+    }
+
+    /// M2 diagnostic path: one unreported warmup pass followed by one measured pass.
     pub fn smoke_direct(&self, decision: Decision) -> Result<DirectSmokeReport> {
         let (sender, receiver) = sync_channel(1);
         self.sender
@@ -281,6 +377,14 @@ fn worker_main(
 
     while let Ok(request) = receiver.recv() {
         match request {
+            Request::Encode { decision, response } => {
+                let result = encode_direct_prompt(&model, &spec, &info, &decision);
+                let _ = response.send(result);
+            }
+            Request::Score { decision, response } => {
+                let result = score_direct(&backend, &model, &spec, &options, &info, &decision);
+                let _ = response.send(result);
+            }
             Request::Smoke { decision, response } => {
                 let result = direct_smoke(&backend, &model, &spec, &options, &info, &decision);
                 let _ = response.send(result);
@@ -355,6 +459,11 @@ fn initialize_worker(
             memory_free: device.memory_free,
         })
         .collect();
+    let (gpu_layers_actual, gpu_layers_status) = if options.device == Device::Cpu {
+        (Some(0), GpuLayersStatus::KnownDisabled)
+    } else {
+        (None, GpuLayersStatus::Unavailable)
+    };
     let info = LoadedModelInfo {
         id: spec.id.clone(),
         artifact_sha256: actual_sha256,
@@ -371,7 +480,8 @@ fn initialize_worker(
         backend: format!("llama-cpp-2/0.1.156 llama.cpp/{LLAMA_CPP_COMMIT}"),
         device_requested: options.device,
         gpu_layers_requested: options.gpu_layers,
-        gpu_layers_actual: None,
+        gpu_layers_actual,
+        gpu_layers_status,
         runtime_devices,
     };
     tracing::info!(
@@ -426,6 +536,213 @@ fn adjudicate_template(
             ),
         ),
     }
+}
+
+fn encode_direct_prompt(
+    model: &LlamaModel,
+    spec: &ModelEntry,
+    info: &LoadedModelInfo,
+    decision: &Decision,
+) -> Result<EncodedPrompt> {
+    // Decision/prompt validation deliberately precedes the production template
+    // eligibility check so malformed per-decision input never reaches decode.
+    let prompt = prepare_prompt(decision, spec.profile)
+        .map_err(|error| BackendError::Core(error.to_string()))?;
+    ensure_production_template(info)?;
+    let tokenizer = LlamaTokenizer { model };
+    let slots = verify_slots(&tokenizer, &prompt.text, decision.options.len())
+        .map_err(|error| BackendError::Core(error.to_string()))?;
+    Ok(EncodedPrompt {
+        id: decision.id.clone(),
+        prompt_sha256: prompt.prompt_sha256,
+        prompt_version: prompt.prompt_version,
+        option_ids: decision
+            .options
+            .iter()
+            .map(|option| option.id.clone())
+            .collect(),
+        prompt_token_ids: slots.prompt_token_ids,
+        answer_token_ids: slots.answer_token_ids,
+    })
+}
+
+fn ensure_production_template(info: &LoadedModelInfo) -> Result<()> {
+    match info.template_status {
+        TemplateStatus::Exact | TemplateStatus::ReviewedEquivalent => Ok(()),
+        TemplateStatus::Mismatch | TemplateStatus::Missing => Err(BackendError::Metadata(
+            info.template_diagnostic.clone().unwrap_or_else(|| {
+                "registered artifact has no production-approved prompt template".to_owned()
+            }),
+        )),
+    }
+}
+
+fn score_direct(
+    backend: &LlamaBackend,
+    model: &LlamaModel,
+    spec: &ModelEntry,
+    options: &EngineOptions,
+    info: &LoadedModelInfo,
+    decision: &Decision,
+) -> Result<Readout> {
+    let total_started = Instant::now();
+    let encoded = encode_direct_prompt(model, spec, info, decision)?;
+    let pass = run_direct_pass(
+        backend,
+        model,
+        options,
+        &encoded.prompt_token_ids,
+        &encoded.answer_token_ids,
+    )?;
+    let choice_index = pass.numeric.choice_index;
+    let template_status = match info.template_status {
+        TemplateStatus::Exact => TemplateMetadataStatus::Exact,
+        TemplateStatus::ReviewedEquivalent => TemplateMetadataStatus::ReviewedEquivalent,
+        TemplateStatus::Mismatch | TemplateStatus::Missing => {
+            return Err(BackendError::Metadata(
+                "unapproved template reached production readout".to_owned(),
+            ));
+        }
+    };
+    let template_equivalence_evidence = spec.template_equivalence.as_ref().and_then(|record| {
+        (template_status == TemplateMetadataStatus::ReviewedEquivalent).then(|| {
+            format!(
+                "{}; scope={}; artifact_sha256={}; gguf_template_sha256={}; native_profile_sha256={}",
+                record.evidence,
+                record.scope,
+                record.artifact_sha256,
+                record.gguf_template_sha256,
+                record.native_profile_sha256
+            )
+        })
+    });
+    let run_id = format!(
+        "openjev-{}-{}",
+        std::process::id(),
+        RUN_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let mut readout = Readout {
+        schema: "openjev-readout-v1".to_owned(),
+        id: encoded.id,
+        primitive: Primitive::Choice,
+        choice: encoded.option_ids[choice_index].clone(),
+        choice_index,
+        option_ids: encoded.option_ids,
+        probabilities: pass.numeric.probabilities,
+        option_logits: pass.numeric.option_logits,
+        answer_token_ids: encoded.answer_token_ids,
+        allowed_token_mass: pass.numeric.allowed_token_mass,
+        full_vocab_argmax_id: pass.numeric.full_vocab_argmax_id,
+        full_vocab_log_normalizer: pass.numeric.full_vocab_log_normalizer,
+        input_tokens: u64::try_from(encoded.prompt_token_ids.len())
+            .map_err(|_| BackendError::Context("prompt token count exceeds u64".to_owned()))?,
+        forward_seconds: Some(pass.forward_seconds),
+        total_seconds: None,
+        prompt_sha256: encoded.prompt_sha256,
+        prompt_version: encoded.prompt_version,
+        model: ModelMetadata {
+            id: spec.id.clone(),
+            source: spec.repo.clone(),
+            revision: spec.revision.clone(),
+            file: spec.file.clone(),
+            quant: spec.quant.clone(),
+            backend: info.backend.clone(),
+            artifact_sha256: info.artifact_sha256.clone(),
+            integrity: Integrity::ManifestSha256,
+            dtype: format!("GGUF quantized/mixed {}", spec.quant),
+            native_reference: Some(NativeReference {
+                source: spec.native_reference.source.clone(),
+                revision: spec.native_reference.revision.clone(),
+                dtype: spec.native_reference.dtype.clone(),
+            }),
+            template_profile: spec.profile,
+            template_sha256: info.gguf_template_sha256.clone(),
+            template_override: false,
+            template_status,
+            template_equivalence_evidence,
+            serving_config: Some("llama-direct-v1".to_owned()),
+            adapter: None,
+            adapter_sha256: None,
+            adapter_revision: None,
+            torch_version: None,
+            transformers_version: None,
+        },
+        readout: DIRECT_READOUT.to_owned(),
+        probability_status: PROBABILITY_STATUS.to_owned(),
+        limitations: standard_limitations(),
+        execution: ExecutionMetadata {
+            requested_mode: ExecutionMode::Direct,
+            effective_mode: ExecutionMode::Direct,
+            fallback_reason: None,
+            device: options.device,
+            device_name: selected_device_name(info),
+            gpu_layers_requested: options.gpu_layers,
+            gpu_layers_actual: info.gpu_layers_actual,
+            gpu_layers_status: info.gpu_layers_status,
+            threads: options.threads,
+            n_ctx_requested: options.n_ctx,
+            n_ctx_actual: pass.n_ctx_actual,
+            max_tokens: options.max_tokens,
+            n_batch: pass.n_batch_actual,
+            n_ubatch: pass.n_ubatch_actual,
+            n_seq_max: 1,
+            kv_unified: true,
+            waves: 1,
+            probe_id: None,
+            run_id,
+            group_id: None,
+        },
+        confidence: None,
+        confidence_status: None,
+        p_yes: None,
+        level_values: None,
+        expected_value: None,
+        argmax_level: None,
+        cache_hit: crate::direct_inference_cache_hit(),
+        prefix_tokens: None,
+        prefix_sha256: None,
+        prefill_seconds: None,
+        copy_seconds: None,
+        suffix_forward_seconds: None,
+        shared_timing: None,
+        postprocess: None,
+    };
+    readout.total_seconds = Some(total_started.elapsed().as_secs_f64());
+    readout
+        .validate()
+        .map_err(|error| BackendError::Core(error.to_string()))?;
+    Ok(readout)
+}
+
+fn selected_device_name(info: &LoadedModelInfo) -> String {
+    let selected = match info.device_requested {
+        Device::Cpu => info
+            .runtime_devices
+            .iter()
+            .find(|device| device.device_type == "Cpu"),
+        Device::Metal => info
+            .runtime_devices
+            .iter()
+            .find(|device| device.backend == "MTL"),
+        Device::Cuda => info
+            .runtime_devices
+            .iter()
+            .find(|device| device.backend.to_ascii_uppercase().contains("CUDA")),
+    };
+    selected.map_or_else(
+        || {
+            format!(
+                "{:?} (runtime device name unavailable)",
+                info.device_requested
+            )
+        },
+        |device| {
+            format!(
+                "{}: {} ({})",
+                device.name, device.description, device.backend
+            )
+        },
+    )
 }
 
 fn direct_smoke(
@@ -559,7 +876,7 @@ fn run_direct_pass(
         usize::try_from(n_batch).expect("u32 fits usize on supported targets"),
         1,
     );
-    let started = Instant::now();
+    let forward_started = Instant::now();
     let mut final_logits = None;
     let chunk_size = usize::try_from(n_batch).expect("u32 fits usize on supported targets");
     for (chunk_index, chunk) in prompt_tokens.chunks(chunk_size).enumerate() {
@@ -584,14 +901,19 @@ fn run_direct_pass(
             .decode(&mut batch)
             .map_err(|error| BackendError::Decode(error.to_string()))?;
         if absolute_start + chunk.len() == prompt_tokens.len() {
-            let final_local = i32::try_from(chunk.len() - 1)
+            let observed_local = chunk.len() - 1;
+            validate_final_chunk_local_index(prompt_tokens.len(), chunk_size, observed_local)?;
+            let final_local = i32::try_from(observed_local)
                 .map_err(|_| BackendError::Decode("chunk-local index exceeds i32".to_owned()))?;
             final_logits = Some(context.get_logits_ith(final_local).to_vec());
         }
     }
+    // get_logits_ith synchronizes native work; copying completes the measured
+    // forward interval before f64 postprocessing begins.
     let vocabulary_logits = final_logits.ok_or_else(|| {
         BackendError::Decode("final prompt chunk produced no copied logits".to_owned())
     })?;
+    let forward_seconds = forward_started.elapsed().as_secs_f64();
     let option_logits: Vec<f32> = answer_token_ids
         .iter()
         .map(|token_id| {
@@ -607,7 +929,6 @@ fn run_direct_pass(
         .collect::<Result<_>>()?;
     let numeric = read_logits(&option_logits, &vocabulary_logits)
         .map_err(|error| BackendError::Core(error.to_string()))?;
-    let forward_seconds = started.elapsed().as_secs_f64();
     Ok(DirectPass {
         numeric,
         forward_seconds,
@@ -615,6 +936,25 @@ fn run_direct_pass(
         n_batch_actual,
         n_ubatch_actual,
     })
+}
+
+pub fn validate_final_chunk_local_index(
+    prompt_tokens: usize,
+    chunk_size: usize,
+    observed_index: usize,
+) -> Result<()> {
+    if prompt_tokens == 0 || chunk_size == 0 {
+        return Err(BackendError::Decode(
+            "prompt length and chunk size must be positive".to_owned(),
+        ));
+    }
+    let expected = (prompt_tokens - 1) % chunk_size;
+    if observed_index != expected {
+        return Err(BackendError::Decode(format!(
+            "final logits index must be chunk-local {expected}, got {observed_index}"
+        )));
+    }
+    Ok(())
 }
 
 fn round_context(value: u32) -> Result<u32> {
@@ -698,5 +1038,82 @@ mod tests {
             adjudicate_template(qwen, &qwen.sha256, Some(&"2".repeat(64))).0,
             TemplateStatus::Mismatch
         );
+    }
+
+    #[test]
+    fn strict_encoding_gate_rejects_spacing_and_bos_mutations() {
+        let decision = openjev_core::Decision::new(
+            "row",
+            openjev_core::StateValue::string("state").unwrap(),
+            "question",
+            vec![
+                openjev_core::DecisionOption {
+                    id: "a".to_owned(),
+                    description: "A".to_owned(),
+                },
+                openjev_core::DecisionOption {
+                    id: "b".to_owned(),
+                    description: "B".to_owned(),
+                },
+            ],
+        )
+        .unwrap();
+        let prompt = prepare_prompt(&decision, PromptProfile::Qwen3).unwrap();
+        let encoded = EncodedPrompt {
+            id: "row".to_owned(),
+            prompt_sha256: prompt.prompt_sha256.clone(),
+            prompt_version: "direct-options-v1".to_owned(),
+            option_ids: vec!["a".to_owned(), "b".to_owned()],
+            prompt_token_ids: vec![10, 11, 12],
+            answer_token_ids: vec![32, 33],
+        };
+        encoded
+            .validate_reference(
+                "row",
+                &["a".to_owned(), "b".to_owned()],
+                &prompt.prompt_sha256,
+                3,
+                &[32, 33],
+            )
+            .unwrap();
+
+        // Removing Python's required colon-space changes prompt bytes/hash.
+        let altered_spacing = prompt.text.replacen(": ", ":", 1);
+        let altered_hash = digest_hex(&Sha256::digest(altered_spacing));
+        let mut spacing_mutation = encoded.clone();
+        spacing_mutation.prompt_sha256 = altered_hash;
+        assert!(
+            spacing_mutation
+                .validate_reference(
+                    "row",
+                    &["a".to_owned(), "b".to_owned()],
+                    &prompt.prompt_sha256,
+                    3,
+                    &[32, 33],
+                )
+                .is_err()
+        );
+
+        // An implicit BOS changes the exact no-BOS token sequence/count.
+        let mut bos_mutation = encoded;
+        bos_mutation.prompt_token_ids.insert(0, 151_643);
+        assert!(
+            bos_mutation
+                .validate_reference(
+                    "row",
+                    &["a".to_owned(), "b".to_owned()],
+                    &prompt.prompt_sha256,
+                    3,
+                    &[32, 33],
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn final_logits_index_must_be_local_to_last_chunk() {
+        validate_final_chunk_local_index(513, 512, 0).unwrap();
+        assert!(validate_final_chunk_local_index(513, 512, 512).is_err());
+        assert!(validate_final_chunk_local_index(0, 512, 0).is_err());
     }
 }

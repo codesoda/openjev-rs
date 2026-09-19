@@ -11,7 +11,7 @@ Status: **targeted M2 remediation is implemented and all three exact artifacts n
 - Native pin: `llama-cpp-2 = llama-cpp-sys-2 = 0.1.156`, bundled llama.cpp `e79e4bf660e19f2ad851e06c6913f7a8c5852621`.
 - Metal target: `--features metal`, separate `target-m2-metal`, `GGML_METAL=ON`, `GGML_OPENMP=OFF`, all GPU layers requested. CMake cache confirmed Metal ON. Native logs proved Apple M3 Pro `MTL0` and offload of 29/29, 43/43, and 34/34 layers respectively.
 - True CPU target: `--features native`, separate `target-m2-cpu`, `GGML_METAL=OFF`, `GGML_OPENMP=OFF`, zero GPU layers requested, `offload_kqv=false`, `op_offload=false`. CMake cache confirmed Metal OFF; runtime device enumeration contained CPU only.
-- The safe wrapper does not expose an actual-offloaded-layer count. Structured smoke rows therefore keep `gpu_layers_actual: null`; actual Metal offload evidence is retained in selected native stderr rather than fabricated in metadata. M3 must adjudicate how production Readout's required non-null field can be satisfied if the wrapper still exposes no count.
+- The safe wrapper does not expose an actual-offloaded-layer count. Historical M2 smoke rows therefore keep `gpu_layers_actual: null`; actual Metal offload evidence is retained in selected native stderr rather than fabricated in metadata. M3 resolved production schema semantics with nullable actual plus explicit status, while leaving these historical captures unchanged.
 
 Full configuration is in [`results/m2-config.json`](results/m2-config.json). The original Metal run occurred first; the original CPU run then used `--offline` and the already verified canonical artifacts. The remediation captures on both devices also used `--offline` and reused the same target directories and model cache.
 
@@ -65,4 +65,64 @@ OPENJEV_INTEGRATION=1 GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu \
   --all --offline --device cpu --gpu-layers 0
 ```
 
-These rows are a small M2 smoke only. They are not M3 authored144 prompt/token/logit parity, not shared/batch execution, and not performance benchmarks. M3's mandatory exact Qwen 144-row hash/token gate remains unrun and unclaimed.
+These rows are a small M2 smoke only. They are not M3 authored144 prompt/token/logit parity, not shared/batch execution, and not performance benchmarks. The M3 evidence below supersedes the earlier statement that the exact Qwen gate was unrun; it does not change these M2 captures.
+
+## M3 — production direct readout and strict Qwen parity
+
+Status: **implemented locally; the exact authored144 gate passed and Astra accepted the measured numerical baseline. A targeted `cache_hit` metadata fix now awaits parent/Astra re-review before commit.** M4 CLI, M5 shared/batch execution, and M6 performance/eval commands were not implemented.
+
+Production `EngineHandle::score_direct` now returns a validated full `openjev-readout-v1` from one clean prompt prefill per decision (chunking allowed), with no per-row warmup and no generation. All option slots are single-token/ASCII/unique/in-vocabulary and append-boundary checked before decode. Forward timing spans decode plus synchronized `get_logits_ith`/logit copy; total timing includes prompt rendering, tokenization/slot validation, context construction, f64 readout, and metadata construction. Every direct call creates a fresh context and prefills the complete prompt, so production readouts now report inference `cache_hit=false` regardless of whether the GGUF artifact was already in the download cache. Artifact cache status remains separate cache/runner metadata. The M2 `smoke_direct` path remains deliberately two-pass (warmup plus measured).
+
+Each retained row reports the pinned GGUF repo/revision/file, artifact SHA-256, Q8_0 quantized/mixed dtype, native BF16 source/revision, llama wrapper/native commit, prompt profile/hash/version, token/slot IDs, raw f64-stored logits converted from native f32, probabilities, full-vocabulary statistics, forward/total timing, and actual execution configuration. Metal requests all layers, while `gpu_layers_actual=null` and `gpu_layers_status=unavailable` honestly record the safe-wrapper gap; reduced native stderr proves 29/29 layers offloaded. CPU production metadata uses actual `0` only when the native CPU path requests zero and disables offload. The schema/PLAN now normatively permit integer-or-null actual layers and require a status; no requested layer count is re-labelled as actual.
+
+### Exact gate
+
+Command (offline, existing M2 cache and `target-m2-metal` only):
+
+```sh
+OPENJEV_INTEGRATION=1 GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal RUST_LOG=info \
+  cargo run -p openjev-llama --features metal,integration --example m3_parity -- \
+  --device metal \
+  --authored-output docs/results/m3-qwen3-metal-authored144.predictions.jsonl \
+  --perturbations-output docs/results/m3-qwen3-metal-perturbations108.predictions.jsonl \
+  --report docs/results/m3-qwen3-metal-report.json
+```
+
+All fixture/reference inputs and create-only output paths were validated before model load. The runner indexed all 252 unique committed BF16 prediction rows by semantic ID, selected the exact 144 authored IDs and 108 perturbation IDs, rejected duplicates/missing IDs, and never zipped by file position.
+
+| Set | Rows | prompt SHA exact | input tokens exact | option IDs exact | answer token IDs exact | all-slot boundaries | finite readouts |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| mandatory authored144 | 144 | 144 | 144 | 144 | 144 | 144 | 144 |
+| extended perturbations108 | 108 | 108 | 108 | 108 | 108 | 108 | 108 |
+
+Any mismatch is a hard runner error; there is no threshold, skip, or xfail. An opt-in integration test independently loaded the cached Qwen artifact and passed encoded prompt/hash/token/slot validation for all 144 authored rows. Ordinary workspace tests compile zero M3 integration tests and never access a model or network. Unit regressions prove that altered Python JSON spacing, an inserted BOS token, and an absolute rather than last-chunk-local logits index are detected without modifying production behavior.
+
+### Measured Q8_0 versus native BF16 delta
+
+No guessed 98% criterion is asserted. The measured comparison is:
+
+| Set | first-argmax agreement | Logit MAE / RMSE / max abs | Probability MAE / RMSE / max abs |
+|---|---:|---:|---:|
+| authored144 | 140/144 = 0.972222 | 0.534313 / 0.664228 / 2.543209 | 0.023046 / 0.068618 / 0.513266 |
+| perturbations108 | 107/108 = 0.990741 | 0.565334 / 0.721156 / 2.591896 | 0.014599 / 0.056621 / 0.542852 |
+
+Authored mismatch IDs and BF16/local first-choice probability margins:
+
+- `533d4423d311de82b27d`: BF16 `B`, margin 0.358355; local `A`, margin 0.006306.
+- `e1d610bd14e3d16c09b9`: BF16 `B`, margin 0.634824; local `A`, margin 0.391645.
+- `6db17cc22bd656d78558`: BF16 `prohibited`, margin 0.194460; local `permitted`, margin 0.126730.
+- `b8c5b9b285cbdddc9f8d`: BF16 `B`, margin 0.185146; local `insufficient`, margin 0.339048.
+
+Extended mismatch: `0b580003cbe6b93cefd6`, BF16 `A` margin 0.462085 versus local `B` margin 0.623574. This is an empirical comparison of the pinned llama.cpp backend/Q8_0 GGUF against committed native-BF16 reference rows. It is not a same-artifact backend test, not a numerical-equivalence claim, and does not establish quantization as the only cause of the differences. Astra accepted 140/144 with logit MAE 0.534313, plus the 107/108 extended result, as the measured baseline; no 98% gate or other guessed tolerance applies.
+
+### Retained M3 artifacts
+
+Evidence note: the original 252 create-only production rows are preserved byte-for-byte and all incorrectly contain `cache_hit=true`. That historical field reflects the now-fixed defect that copied download-cache status into inference metadata; it must not be read as prefix reuse. The raw logits, probabilities, exact prompt/token gates, numerical comparison, file sizes, and hashes are unaffected. The corrected production path and runner assertion require `cache_hit=false`; the full numerical benchmark was not rerun or silently rewritten for this metadata-only fix.
+
+- `m3-qwen3-metal-authored144.predictions.jsonl`: 144 rows, 388,242 bytes, SHA-256 `95bff7a6b8a4fcd73deffd2db7de7f88900530726264096266b0a9cf8976bc67`.
+- `m3-qwen3-metal-perturbations108.predictions.jsonl`: 108 rows, 291,218 bytes, SHA-256 `4272e100f23774e93bbaeaab740c697562519185bcde4701b0fdf5dd36f7103a`.
+- `m3-qwen3-metal-report.json`: 6,500 bytes, SHA-256 `ef131a91c09ab21f2d4017203834436b44f8ef96f8775434d7111aab13e11edf`.
+- `m3-qwen3-metal-run.stdout.json`: one JSON summary object only, 615 bytes, SHA-256 `0ac098f920fe69c54f652a53af6dad8cd008247f00bbc330777eba329f3b60a7`.
+- `m3-qwen3-metal-run.stderr.txt`: reduced native stderr, 3,119 bytes, SHA-256 `819b7cd85667df45f61ad0cb5b4ec797661e8ceeb4f022b1f68cc14c15057333`, with command/device/offload/context evidence and the original raw capture hash/size; native logs never entered stdout.
+
+The report also records hashes/sizes for authored144, perturbations108, and the 252-row reference; complete model/config metadata; exact-gate counts; mismatch IDs; and both reference/local margins. Files were created with create-new semantics. No model was downloaded, no new native target directory was made, and `reference/` remains unchanged.
