@@ -1,0 +1,45 @@
+# cargo-about 0.9.2 configuration for the two distributed CLI targets.
+#
+# `accepted` is the set needed to resolve the pinned Cargo.lock graph. It is
+# not a blanket policy exception. In particular, colored 3.1.1 and option-ext
+# 0.2.0 are MPL-2.0-only transitive dependencies through hf-hub/hf-xet; keep
+# their terms and source-availability obligations visible during release review.
+accepted = [
+  "MIT",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  "BSL-1.0",
+  "0BSD",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "MPL-2.0",
+]
+
+# Build dependencies can contribute generated or native code to the binary.
+ignore-build-dependencies = false
+ignore-dev-dependencies = true
+ignore-transitive-dependencies = false
+workarounds = ["ring", "rustls"]
+
+# The registry packages omit the bindings repository's root license files, and
+# llama-cpp-sys-2 otherwise gets misidentified from a bundled cpp-httplib
+# license. Pin the actual crate source revision and exact root MIT notice.
+[llama-cpp-2.clarify]
+license = "MIT OR Apache-2.0"
+
+[[llama-cpp-2.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "763912bd05f42956dbfa900bd1a2f8037c704f5c64d778c623ec5952454e24aa"
+
+[llama-cpp-sys-2.clarify]
+license = "MIT OR Apache-2.0"
+
+[[llama-cpp-sys-2.clarify.git]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "763912bd05f42956dbfa900bd1a2f8037c704f5c64d778c623ec5952454e24aa"

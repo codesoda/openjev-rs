@@ -43,7 +43,23 @@ TARGETS = {
 }
 NATIVE_CRATE_VERSION = "0.1.156"
 LLAMA_CPP_COMMIT = "e79e4bf660e19f2ad851e06c6913f7a8c5852621"
-MEMBER_FILES = ("openjev", "LICENSE", "THIRD_PARTY.md", "README.md", "SERVE.md", "BUILD-INFO.json")
+SOURCE_ARCHIVE_PATHS = {
+    "colored-3.1.1.crate": ("licenses", "sources", "colored-3.1.1.crate"),
+    "option-ext-0.2.0.crate": ("licenses", "sources", "option-ext-0.2.0.crate"),
+}
+RUST_NOTICE_PATH = ("licenses", "RUST-COPYRIGHT-library.html")
+MEMBER_FILES = (
+    "openjev",
+    "LICENSE",
+    "THIRD_PARTY.md",
+    "THIRD_PARTY_LICENSES.html",
+    "RUST-COPYRIGHT-library.html",
+    "colored-3.1.1.crate",
+    "option-ext-0.2.0.crate",
+    "README.md",
+    "SERVE.md",
+    "BUILD-INFO.json",
+)
 SOURCE_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 VERSION_RE = re.compile(r'^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$')
 
@@ -171,13 +187,21 @@ def package_archive(args):
     run_json_command(binary, "--version", "openjev-version-v1", version, repo_root)
     run_json_command(binary, "--help", "openjev-help-v1", cwd=repo_root)
 
-    documentation = {
+    package_sources = {
         "LICENSE": repo_root / "LICENSE",
         "THIRD_PARTY.md": repo_root / "THIRD_PARTY.md",
+        "THIRD_PARTY_LICENSES.html": repo_root / "THIRD_PARTY_LICENSES.html",
+        "RUST-COPYRIGHT-library.html": repo_root.joinpath(*RUST_NOTICE_PATH),
         "README.md": repo_root / "docs" / "RELEASE.md",
         "SERVE.md": repo_root / "docs" / "SERVE.md",
     }
-    for destination, source in documentation.items():
+    package_sources.update(
+        {
+            destination: repo_root.joinpath(*relative_path)
+            for destination, relative_path in SOURCE_ARCHIVE_PATHS.items()
+        }
+    )
+    for destination, source in package_sources.items():
         if not source.is_file():
             fail("missing package input for %s: %s" % (destination, source))
 
@@ -190,7 +214,7 @@ def package_archive(args):
         fail("refusing to overwrite archive: %s" % archive_path)
 
     file_data = {"openjev": binary.read_bytes()}
-    for destination, source in documentation.items():
+    for destination, source in package_sources.items():
         file_data[destination] = source.read_bytes()
     file_hashes = {name: hashlib.sha256(data).hexdigest() for name, data in sorted(file_data.items())}
     target_metadata = TARGETS[args.target]

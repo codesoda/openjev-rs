@@ -92,9 +92,13 @@ exactly `v` plus the Cargo workspace version. Both native jobs must pass before
 a GitHub Release is created; branch, pull-request, and manual runs upload only
 ordinary workflow artifacts.
 
-Each release archive contains the executable, license/third-party notices,
-runtime documentation, and `BUILD-INFO.json`; model weights and cache data are
-never packaged. The release also has `SHA256SUMS`. CI executes the extracted
+Each release archive contains the executable, the project license/attribution
+file, a complete `THIRD_PARTY_LICENSES.html` dependency notice bundle, the
+official Rust 1.95.0 library/runtime `RUST-COPYRIGHT-library.html` notices, the
+complete unmodified `colored-3.1.1.crate` and `option-ext-0.2.0.crate`
+MPL-2.0 covered-source archives, runtime documentation, and `BUILD-INFO.json`;
+model weights and cache data are never packaged. The release also has
+`SHA256SUMS`. CI executes the extracted
 binary from a temporary directory outside the checkout and checks that native
 dynamic dependencies resolve only to operating-system libraries. The macOS
 binary embeds its Metal library, but is not Developer ID signed or Apple

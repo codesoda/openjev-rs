@@ -60,6 +60,15 @@ jobs:
           rustc --version
           cargo --version
 
+      - name: Cache pinned Cargo dependencies and native build outputs
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: openjev-v1-${{ matrix.target }}-rust195-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.github/workflows/ci-release.yml') }}
+
       - name: Install Linux native build prerequisites
         if: runner.os == 'Linux'
         shell: bash
@@ -101,12 +110,13 @@ jobs:
             } >> "$GITHUB_ENV"
           fi
 
-      - name: Validate release ref and packaging tests
+      - name: Validate release ref, license bundle, and packaging tests
         shell: bash
         run: |
           set -euo pipefail
           python3 scripts/release.py validate-ref --ref "$GITHUB_REF"
-          python3 -m unittest discover -s scripts/tests -p 'test_release.py' -v
+          python3 scripts/check_third_party_licenses.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Check formatting
         shell: bash
@@ -143,21 +153,7 @@ jobs:
           set -euo pipefail
           cache=$(find target/release/build -path '*/llama-cpp-sys-2-*/out/build/CMakeCache.txt' -print -quit)
           test -n "$cache"
-          grep -Fqx 'BUILD_SHARED_LIBS:BOOL=OFF' "$cache"
-          grep -Fqx 'GGML_BLAS:BOOL=OFF' "$cache"
-          grep -Fqx 'GGML_OPENMP:BOOL=OFF' "$cache"
-          grep -Fqx 'GGML_NATIVE:BOOL=OFF' "$cache"
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            grep -Fqx 'GGML_METAL:BOOL=ON' "$cache"
-            grep -Fqx 'GGML_METAL_EMBED_LIBRARY:BOOL=ON' "$cache"
-            grep -Fqx 'CMAKE_OSX_DEPLOYMENT_TARGET:STRING=14.0' "$cache"
-          else
-            for option in GGML_SSE42 GGML_AVX GGML_AVX_VNNI GGML_AVX2 GGML_BMI2 \
-              GGML_AVX512 GGML_AVX512_VBMI GGML_AVX512_VNNI GGML_AVX512_BF16 \
-              GGML_FMA GGML_F16C; do
-              grep -Fqx "$option:BOOL=OFF" "$cache"
-            done
-          fi
+          python3 scripts/check_native_build.py --platform "$RUNNER_OS" "$cache"
 
       - name: Package and smoke outside checkout
         shell: bash

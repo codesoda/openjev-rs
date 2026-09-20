@@ -105,6 +105,10 @@ class ReleasePackagingTests(unittest.TestCase):
                         "openjev-v%s-aarch64-apple-darwin/openjev" % WORKSPACE_VERSION,
                         "openjev-v%s-aarch64-apple-darwin/LICENSE" % WORKSPACE_VERSION,
                         "openjev-v%s-aarch64-apple-darwin/THIRD_PARTY.md" % WORKSPACE_VERSION,
+                        "openjev-v%s-aarch64-apple-darwin/THIRD_PARTY_LICENSES.html" % WORKSPACE_VERSION,
+                        "openjev-v%s-aarch64-apple-darwin/RUST-COPYRIGHT-library.html" % WORKSPACE_VERSION,
+                        "openjev-v%s-aarch64-apple-darwin/colored-3.1.1.crate" % WORKSPACE_VERSION,
+                        "openjev-v%s-aarch64-apple-darwin/option-ext-0.2.0.crate" % WORKSPACE_VERSION,
                         "openjev-v%s-aarch64-apple-darwin/README.md" % WORKSPACE_VERSION,
                         "openjev-v%s-aarch64-apple-darwin/SERVE.md" % WORKSPACE_VERSION,
                         "openjev-v%s-aarch64-apple-darwin/BUILD-INFO.json" % WORKSPACE_VERSION,
@@ -115,6 +119,29 @@ class ReleasePackagingTests(unittest.TestCase):
                 self.assertIsNone(build_info["tag"])
                 self.assertFalse(build_info["distribution"]["contains_model_weights"])
                 self.assertEqual(build_info["backend"]["llama_cpp_sys_crate"], "0.1.156")
+                self.assertIn("THIRD_PARTY_LICENSES.html", build_info["files_sha256"])
+                notice_member = "openjev-v%s-aarch64-apple-darwin/THIRD_PARTY_LICENSES.html" % WORKSPACE_VERSION
+                notices = archive.extractfile(notice_member).read().decode("utf-8")
+                self.assertIn("Copyright (c) Tokio Contributors", notices)
+                self.assertIn("Copyright 2024 Mozilla Foundation", notices)
+                rust_notice = "RUST-COPYRIGHT-library.html"
+                rust_source = REPO_ROOT / "licenses" / rust_notice
+                rust_member = "openjev-v%s-aarch64-apple-darwin/%s" % (WORKSPACE_VERSION, rust_notice)
+                packaged_rust_notice = archive.extractfile(rust_member).read()
+                rust_notice_hash = "90567e2718bf7fd65a71a3a43c5596488e80e5f51ed02bfea6fec54458b5f3d1"
+                self.assertEqual(packaged_rust_notice, rust_source.read_bytes())
+                self.assertEqual(hashlib.sha256(packaged_rust_notice).hexdigest(), rust_notice_hash)
+                self.assertEqual(build_info["files_sha256"][rust_notice], rust_notice_hash)
+                for filename, expected_hash in {
+                    "colored-3.1.1.crate": "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34",
+                    "option-ext-0.2.0.crate": "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d",
+                }.items():
+                    source = REPO_ROOT / "licenses" / "sources" / filename
+                    member = "openjev-v%s-aarch64-apple-darwin/%s" % (WORKSPACE_VERSION, filename)
+                    packaged = archive.extractfile(member).read()
+                    self.assertEqual(packaged, source.read_bytes())
+                    self.assertEqual(hashlib.sha256(packaged).hexdigest(), expected_hash)
+                    self.assertEqual(build_info["files_sha256"][filename], expected_hash)
 
     def test_tag_and_binary_must_exactly_match_cargo_version(self):
         good_tag = "v" + WORKSPACE_VERSION

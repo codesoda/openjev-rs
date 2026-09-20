@@ -1,0 +1,35 @@
+aarch64-apple-darwin	Verify native CMake release configuration	﻿2026-09-20T04:52:53.0876770Z ##[group]Run set -euo pipefail
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0877410Z ^[[36;1mset -euo pipefail^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0877980Z ^[[36;1mcache=$(find target/release/build -path '*/llama-cpp-sys-2-*/out/build/CMakeCache.txt' -print -quit)^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0878540Z ^[[36;1mtest -n "$cache"^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0878850Z ^[[36;1mgrep -Fqx 'BUILD_SHARED_LIBS:BOOL=OFF' "$cache"^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0879290Z ^[[36;1mgrep -Fqx 'GGML_BLAS:BOOL=OFF' "$cache"^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0879600Z ^[[36;1mgrep -Fqx 'GGML_OPENMP:BOOL=OFF' "$cache"^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0880020Z ^[[36;1mgrep -Fqx 'GGML_NATIVE:BOOL=OFF' "$cache"^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0880340Z ^[[36;1mif [[ "$RUNNER_OS" == "macOS" ]]; then^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0880690Z ^[[36;1m  grep -Fqx 'GGML_METAL:BOOL=ON' "$cache"^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0881000Z ^[[36;1m  grep -Fqx 'GGML_METAL_EMBED_LIBRARY:BOOL=ON' "$cache"^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0881420Z ^[[36;1m  grep -Fqx 'CMAKE_OSX_DEPLOYMENT_TARGET:STRING=14.0' "$cache"^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0881790Z ^[[36;1melse^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0882220Z ^[[36;1m  for option in GGML_SSE42 GGML_AVX GGML_AVX_VNNI GGML_AVX2 GGML_BMI2 \^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0882680Z ^[[36;1m    GGML_AVX512 GGML_AVX512_VBMI GGML_AVX512_VNNI GGML_AVX512_BF16 \^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0883010Z ^[[36;1m    GGML_FMA GGML_F16C; do^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0883300Z ^[[36;1m    grep -Fqx "$option:BOOL=OFF" "$cache"^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0883550Z ^[[36;1m  done^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.0883800Z ^[[36;1mfi^[[0m
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1237730Z shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1238180Z env:
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1238390Z   CARGO_INCREMENTAL: 0
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1238680Z   CARGO_TERM_COLOR: always
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1238900Z   RUSTUP_TOOLCHAIN: 1.95.0
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1239160Z   CARGO_BUILD_JOBS: 2
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1239370Z   CMAKE_BUILD_PARALLEL_LEVEL: 2
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1239690Z   SOURCE_DATE_EPOCH: 1789879082
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1239960Z   OPENJEV_HOME: /Users/runner/work/_temp/openjev-no-models
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1240350Z   GGML_METAL: ON
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1240620Z   GGML_METAL_EMBED_LIBRARY: ON
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1240890Z   GGML_NATIVE: OFF
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1241100Z   MACOSX_DEPLOYMENT_TARGET: 14.0
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1241400Z   CMAKE_OSX_DEPLOYMENT_TARGET: 14.0
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.1241640Z ##[endgroup]
+aarch64-apple-darwin	Verify native CMake release configuration	2026-09-20T04:52:53.2317650Z ##[error]Process completed with exit code 1.
