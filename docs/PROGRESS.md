@@ -472,3 +472,82 @@ This closes the bounded tagged-release/download/install/Metal HTTP/SDK acceptanc
 Independent Astra final acceptance review: **PASS, no release blockers.** The reviewer independently checked local/remote tag identity, live successful CI/release metadata and GitHub asset digests, both archive/payload hashes, installed binary identity/version/system linkage, retained HTTP/SDK/Metal evidence, process cleanup, repository privacy and unchanged implementation/lock/scripts/workflow/reference paths. Parent reviewed Sol's documentation diff and corrected the distinctions between decoded-response equality and byte equality, and between smoke start time and completion.
 
 Provenance remains deliberately split: the immutable release source is tag `v0.1.0` / commit `bb234066…ad3f`; this documentation-only follow-up records the later downloaded-artifact evidence and final review. It does not move the release tag, replace published assets, or change implementation. The commit containing this section is the evidence follow-up, not the release source.
+
+## HTTP demo command
+
+Added `openjev demo`, an HTTP-only client that posts eight short examples to a
+running server's `/v1/systemone`. Covers Choice, Noul, Score, and a mixed-question
+request. The command does not initialize a backend or download weights. Default
+URL is `http://127.0.0.1:8080`; supports `--base-url`, `--api-key-env`,
+`--timeout-secs`, and an optional `--model` selector for the already-resident
+model. Progress goes to stderr; stdout is JSONL, or one array with `--pretty`.
+Rows retain the Jev response, round-trip milliseconds, and execution/fallback/
+probability headers. Errors stop the run without following redirects; responses
+are capped at 1 MiB. README documents two-terminal usage and the release boundary.
+
+Validation passed:
+
+- `cargo fmt --all -- --check`.
+- `cargo clippy --locked --offline --workspace --all-targets -- -D warnings`.
+- `cargo test --locked --offline --workspace`: 142 test functions, including seven
+  new demo tests covering real mock HTTP transport, all example payloads, auth,
+  default/custom model selection, output modes, HTTP errors, redirects, malformed
+  and oversized responses, timeout, invalid URL, and unavailable-server guidance.
+- Regenerated and checked third-party license notices. Reqwest 0.13.5 was already
+  locked; the only lockfile change adds it to the CLI's dependencies. The release
+  license closure remains 276 packages.
+- Actual HTTP smoke: the new non-native debug client sent all eight examples to
+  the installed v0.1.0 server using cached Qwen3-0.6B Q8_0, offline, explicitly
+  Metal (Apple M3 Pro). Seven single-question round trips were 129–236 ms; the
+  mixed three-question request was 397 ms. These are one-run smoke timings, not
+  benchmarks (other validation ran concurrently). All responses reported the
+  correct model and zero output tokens; the mixed request disclosed serial
+  fallback. The owned server stopped cleanly with SIGTERM and empty stdout.
+  Raw demo output: [`results/demo/qwen3-0.6b-metal.json`](results/demo/qwen3-0.6b-metal.json).
+
+No backend numerical behavior changed. No models were downloaded, no native
+rebuild was needed for this client smoke, and no installed binary or immutable
+release was replaced. The demo is not included in published v0.1.0.
+
+### Local installation and `serve` subcommand
+
+Following the explicit install request and decision against backward
+compatibility, the server is now `openjev serve`; the former `--serve` flag is
+rejected. Server-only arguments belong after the subcommand. Updated help,
+README, current HTTP documentation, demo diagnostics, and native/server CLI
+tests; historical release evidence and original design notes are unchanged.
+
+Fmt, warnings-denied workspace/all-target Clippy, and all 142 workspace tests
+passed again. Built the optimized Metal executable using the existing
+`target-m2-metal` cache and installed it via the existing
+`~/.local/bin/openjev` → `~/.openjev/bin/openjev` chain. The active payload is
+`~/.openjev/bin/openjev-local-d894391c21a0/openjev`, SHA-256
+`d894391c21a05e79267ab6467a951a8f9abed89b132847490d0ce77fc33e99de`.
+It is labelled as a local development build, not a GitHub release; earlier
+payloads, including v0.1.0, remain available unchanged.
+
+The installed PATH binary passed `serve --help`, `demo --help`, and legacy
+`--serve` rejection. From outside the checkout it then served cached Qwen3-0.6B
+with explicit Metal, while another invocation of the installed binary completed
+all eight demo requests. Verified resident model identity, mixed three-answer
+response and disclosed serial fallback, empty server stdout, Apple M3 Pro Metal
+backend, and clean SIGTERM shutdown. No weights were downloaded. Raw results:
+[`results/demo/qwen3-0.6b-metal-serve-subcommand.json`](results/demo/qwen3-0.6b-metal-serve-subcommand.json).
+
+### README VHS recording
+
+Added a top-of-README GIF and linked MP4, generated with `demo/readme.tape` via
+`bash demo/record.sh`. The wrapper owns an offline cached-Qwen Metal server;
+the tape runs the real demo HTTP client. `demo/present.py` shows an explicitly
+labelled compact projection of all eight live responses, with reading pauses
+and visible serial fallback. No predictions are substituted. Model startup is
+outside capture and the paced playback is not a benchmark. Reproduction and
+release-boundary notes are in `demo/README.md`.
+
+VHS 0.11.0 generated a 32.52-second 1280×860 H.264 MP4 (~310 KiB) and GIF
+(~315 KiB). Verified eight raw responses, model identity, zero generated tokens,
+three mixed answers, and empty server stdout; reviewed sampled Choice, Score,
+and final mixed frames for readability/clipping. ShellCheck, Python compilation,
+VHS validation, FFprobe, and whitespace checks pass. Raw recording logs and rows
+are under ignored `out/demo-recording/`. No Rust/backend changes or new model
+downloads were needed for this media work.

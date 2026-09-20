@@ -24,6 +24,8 @@ fn help_version_and_every_command_help_are_json_stdout_only() {
         vec!["score", "--help"],
         vec!["ask", "--help"],
         vec!["run", "--help"],
+        vec!["serve", "--help"],
+        vec!["demo", "--help"],
         vec!["models", "--help"],
         vec!["models", "list", "--help"],
         vec!["models", "pull", "--help"],
@@ -115,6 +117,7 @@ fn compact_is_documented_and_rejected_for_nondecision_commands() {
     );
 
     for args in [
+        vec!["--compact", "demo"],
         vec!["--compact", "models", "list"],
         vec!["--compact", "eval", "--fixture", "authored144"],
         vec![

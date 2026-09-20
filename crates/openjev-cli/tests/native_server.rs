@@ -75,7 +75,7 @@ fn cached_qwen_resident_server_reuses_one_process_and_stops_on_sigterm() {
     };
     let child = Command::new(env!("CARGO_BIN_EXE_openjev"))
         .args([
-            "--serve",
+            "serve",
             "--offline",
             "--model",
             "qwen3-0.6b",

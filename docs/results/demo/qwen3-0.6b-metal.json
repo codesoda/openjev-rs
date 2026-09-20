@@ -1,0 +1,236 @@
+[
+  {
+    "example": "Support routing",
+    "elapsed_ms": 235.84325,
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {
+        "route": {
+          "type": "choice",
+          "choice": "billing",
+          "confidence": 1.0,
+          "probabilities": {
+            "billing": 1.0,
+            "technical": 0.0,
+            "sales": 0.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 118,
+        "output_tokens": 0
+      }
+    },
+    "metadata": {
+      "x-openjev-execution": "requested=direct; effective=direct",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    }
+  },
+  {
+    "example": "Tool selection",
+    "elapsed_ms": 187.78025000000002,
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {
+        "tool": {
+          "type": "choice",
+          "choice": "search",
+          "confidence": 1.0,
+          "probabilities": {
+            "search": 1.0,
+            "calculator": 0.0,
+            "none": 0.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 133,
+        "output_tokens": 0
+      }
+    },
+    "metadata": {
+      "x-openjev-execution": "requested=direct; effective=direct",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    }
+  },
+  {
+    "example": "Message intent",
+    "elapsed_ms": 139.288208,
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {
+        "intent": {
+          "type": "choice",
+          "choice": "cancel",
+          "confidence": 1.0,
+          "probabilities": {
+            "cancel": 1.0,
+            "upgrade": 0.0,
+            "refund": 0.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 121,
+        "output_tokens": 0
+      }
+    },
+    "metadata": {
+      "x-openjev-execution": "requested=direct; effective=direct",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    }
+  },
+  {
+    "example": "Explicit refund request",
+    "elapsed_ms": 149.820916,
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {
+        "refund": {
+          "type": "noul",
+          "noul": 0.85
+        }
+      },
+      "usage": {
+        "input_tokens": 101,
+        "output_tokens": 0
+      }
+    },
+    "metadata": {
+      "x-openjev-execution": "requested=direct; effective=direct",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    }
+  },
+  {
+    "example": "Missing information",
+    "elapsed_ms": 128.71175000000002,
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {
+        "clarify": {
+          "type": "noul",
+          "noul": 0.99
+        }
+      },
+      "usage": {
+        "input_tokens": 109,
+        "output_tokens": 0
+      }
+    },
+    "metadata": {
+      "x-openjev-execution": "requested=direct; effective=direct",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    }
+  },
+  {
+    "example": "Incident urgency",
+    "elapsed_ms": 152.230042,
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {
+        "urgency": {
+          "type": "score",
+          "score": 2.0,
+          "confidence": 1.0,
+          "legend": {
+            "0": "low: cosmetic issue",
+            "1": "medium: partial degradation",
+            "2": "high: critical service unavailable"
+          },
+          "probabilities": {
+            "0": 0.0,
+            "1": 0.0,
+            "2": 1.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 135,
+        "output_tokens": 0
+      }
+    },
+    "metadata": {
+      "x-openjev-execution": "requested=direct; effective=direct",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    }
+  },
+  {
+    "example": "Evidence sufficiency",
+    "elapsed_ms": 142.716083,
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {
+        "evidence": {
+          "type": "score",
+          "score": 1.97,
+          "confidence": 0.96,
+          "legend": {
+            "0": "none",
+            "1": "weak",
+            "2": "strong"
+          },
+          "probabilities": {
+            "0": 0.0,
+            "1": 0.03,
+            "2": 0.97
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 139,
+        "output_tokens": 0
+      }
+    },
+    "metadata": {
+      "x-openjev-execution": "requested=direct; effective=direct",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    }
+  },
+  {
+    "example": "Mixed ticket triage",
+    "elapsed_ms": 396.621583,
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {
+        "route": {
+          "type": "choice",
+          "choice": "engineering",
+          "confidence": 1.0,
+          "probabilities": {
+            "engineering": 1.0,
+            "billing": 0.0,
+            "sales": 0.0
+          }
+        },
+        "review": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "urgency": {
+          "type": "score",
+          "score": 0.14,
+          "confidence": 0.84,
+          "legend": {
+            "0": "low",
+            "1": "medium",
+            "2": "high"
+          },
+          "probabilities": {
+            "0": 0.89,
+            "1": 0.07,
+            "2": 0.03
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 376,
+        "output_tokens": 0
+      }
+    },
+    "metadata": {
+      "x-openjev-execution": "requested=shared; effective=serial",
+      "x-openjev-fallback": "shared unavailable; serial full-prompt fallback",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    }
+  }
+]

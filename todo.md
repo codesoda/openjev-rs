@@ -27,7 +27,8 @@ and [`docs/PROGRESS.md`](docs/PROGRESS.md) records actual implementation and
 runtime evidence. M1–M5 are approved and committed; M3's strict authored144 plus
 perturbations108 prompt/token/slot gates pass. Partial M6 evaluation/benchmark
 and compact-output work is checkpointed at `1dcfad3` and remains incomplete.
-The resident `openjev --serve` extension has passed parent/Astra review and real
+The resident HTTP extension (originally `openjev --serve`, now `openjev serve`)
+has passed parent/Astra review and real
 Metal HTTP/official SDK smoke tests. Tagged release `v0.1.0` is published from
 exact source `bb23406606e423fb35f5e62fdf5f170a6b14ad3f`; its main and tag CI
 runs passed, both release archives were downloaded and verified, and the
@@ -37,6 +38,13 @@ enable any failed shared/batch profile. Independent Astra final release review
 passed; the evidence write-up is a separate documentation-only follow-up on
 `main`, not part of the immutable release tag. **The full original brief below is preserved**, not
 rewritten as if all later milestones were complete.
+
+### Post-release HTTP demo
+
+- [x] Add `openjev demo`: eight HTTP examples against the resident server, Choice/Noul/Score, JSONL or a pretty JSON array, stderr progress, timing, optional bearer auth, and explicit fallback metadata.
+- [x] Mock HTTP/error-path tests and a real cached-Qwen Metal smoke; README two-terminal usage. See `docs/PROGRESS.md`.
+- [x] Replace the `--serve` flag with a `serve` subcommand, without a compatibility alias; update current docs and CLI tests.
+- [ ] Publish a new release containing the demo and `serve` subcommand (v0.1.0 is unchanged).
 
 ### Focused v0.1.0 release checklist (not full-brief completion)
 
@@ -100,7 +108,7 @@ rewritten as if all later milestones were complete.
 
 ## 1. Goals
 
-1. `openjev` CLI: decisions in, JSON out, scriptable/pipeable, local. The later user-requested, separately reviewed `--serve` extension supersedes the original “no server” boundary without changing default CLI output.
+1. `openjev` CLI: decisions in, JSON out, scriptable/pipeable, local. The later user-requested, separately reviewed `serve` extension supersedes the original “no server” boundary without changing default CLI output.
 2. Library crate usable from other Rust code (later: a `System1` trait shared
    with `gliner2-rs`, see `reference/gliner2-rs-notes/jev-and-gliner.md` §5).
 3. Bit-for-bit **prompt parity** with the Python `direct-options-v1` prompt
@@ -404,7 +412,7 @@ No M5 shared/batch speedup is claimed. The large true-CPU shared deltas were ins
 - `System1` trait crate shared with `gliner2-rs` (`choice/noul/score` →
   distribution), so callers can swap a 194M encoder for a 4B decoder per
   question.
-- `--serve` HTTP/JSON residency is now implemented as a bounded Jev-compatible subset; a cross-request warm state-prefix cache is still future work. `--watch` REPL keeping one state prefilled remains future work.
+- `serve` HTTP/JSON residency is now implemented as a bounded Jev-compatible subset; a cross-request warm state-prefix cache is still future work. `--watch` REPL keeping one state prefilled remains future work.
 - Reranker mode (`Qwen3-Reranker-4B` yes/no log-odds per option).
 - Larger option cardinality (two-char slots), shortlist-then-choose for >16.
 - Conformal / temperature calibration tooling with reliability diagrams.

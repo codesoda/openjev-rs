@@ -118,7 +118,7 @@ pub fn validate_server_global_args(global: &GlobalArgs) -> Result<(), CliError> 
         || global.calibration.is_some()
     {
         return Err(CliError::validation(
-            "--compact, --pretty, --confidence, --permute, --seed, --temperature, and --calibration are not valid with --serve",
+            "--compact, --pretty, --confidence, --permute, --seed, --temperature, and --calibration are not valid with serve",
         ));
     }
     Ok(())

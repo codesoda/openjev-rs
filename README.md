@@ -2,9 +2,13 @@
 
 # openjev-rs
 
+<img src="docs/demo.gif" alt="OpenJev demo: eight live HTTP examples returning Choice, Noul, and Score JSON from a resident local model" width="100%">
+
+<sub>[Watch the MP4](docs/demo.mp4) · [Re-record with VHS](demo/README.md) · Live Qwen3-0.6B / Metal; compact display paced for reading, not a benchmark. Current source build, not v0.1.0.</sub>
+
 **Local typed decisions for scripts, applications, and AI agents.**
 
-Run `openjev` once from the command line, or start `openjev --serve` to keep a
+Run `openjev` once from the command line, or start `openjev serve` to keep a
 model loaded behind a Jev-compatible HTTP API. Both return JSON—no generated
 prose to parse, and no hosted inference service required.
 
@@ -164,7 +168,7 @@ help and validation work, but inference returns `backend_unavailable`.
 
 These examples use the model downloaded above. A one-shot invocation loads the
 model and exits after returning its result. For repeated calls, use
-[`--serve`](#jev-compatible-http-server) instead.
+[`serve`](#jev-compatible-http-server) instead.
 
 **Choose an option:**
 
@@ -196,7 +200,7 @@ openjev --offline --model qwen3-0.6b --compact --quiet --pretty score \
 | Option | Purpose |
 | --- | --- |
 | `--compact` | Smaller decision JSON for code or an LLM; omits full model/runtime diagnostics |
-| `--pretty` | Indented JSON for a single result; not supported for JSONL or multiple questions |
+| `--pretty` | Indented JSON for a single result (or the demo's result array); not supported for decision JSONL or multiple questions |
 | `--quiet` | Suppress routine logs; warnings and errors remain on stderr |
 | `--confidence` | Include the explicitly uncalibrated confidence value |
 | `--state-file PATH` | Read state as text from a file |
@@ -244,14 +248,51 @@ any failed batch row), **2** invalid arguments/input. `--pretty` is not valid fo
 
 Start a resident server with the cached model:
 
+Source builds use the `serve` subcommand (no `--serve` alias). The older v0.1.0
+release uses `--serve` and does not contain the demo command.
+
 ```sh
-openjev --serve --offline --model qwen3-0.6b \
+openjev serve --offline --model qwen3-0.6b \
   --host 127.0.0.1 --port 8080
 ```
 
 The model is loaded and warmed once. The default address is
 `http://127.0.0.1:8080`. Leave this process running and send requests from another
-terminal:
+terminal.
+
+**Try eight examples:**
+
+```sh
+# Terminal 2 — leave the server running in Terminal 1
+openjev demo --pretty
+```
+
+The demo sends eight sequential `POST /v1/systemone` requests: support routing,
+agent tool selection, message intent, refund detection, missing information,
+incident urgency, evidence sufficiency, and mixed Choice/Noul/Score triage.
+It uses the server's resident model, **without loading or downloading another
+model**. These illustrate the API; they are not accuracy tests.
+
+Progress, states, and questions go to stderr. stdout contains results with
+`example`, `elapsed_ms` (HTTP round-trip time, including queueing), the unchanged
+Jev `response`, and `metadata` preserving execution/fallback/probability headers.
+By default results stream as JSONL; `--pretty` emits one JSON array after all
+examples succeed. Use `--quiet` to suppress progress. A failed example stops the
+run with a nonzero exit code; JSONL results already written remain available.
+
+```sh
+# Custom port; omit --api-key-env for an unauthenticated loopback server
+openjev demo --base-url http://127.0.0.1:9090 --api-key-env OPENJEV_API_KEY
+# /v1 is also accepted; per-request timeout defaults to 130 seconds
+openjev demo --base-url http://127.0.0.1:8080/v1 --timeout-secs 180
+```
+
+`--model` optionally names the model expected on the server; it does not load or
+switch models. The demo requires a build containing this feature (it is not in
+v0.1.0). Run the server and demo in separate terminals, not with `&&`: the server
+stays in the foreground until stopped.
+
+**Or call the API directly:**
 
 ```sh
 curl --fail-with-body --silent --show-error http://127.0.0.1:8080/readyz
@@ -331,7 +372,7 @@ unencrypted HTTP publicly.
 
 ```sh
 export OPENJEV_API_KEY='replace-with-a-long-random-secret'
-openjev --serve --offline --model qwen3-0.6b \
+openjev serve --offline --model qwen3-0.6b \
   --host 0.0.0.0 --port 8080 --api-key-env OPENJEV_API_KEY
 ```
 
@@ -390,7 +431,7 @@ Download size is not runtime memory usage. To use the larger model:
 
 ```sh
 openjev models pull qwen3.5-4b
-openjev --serve --offline --model qwen3.5-4b
+openjev serve --offline --model qwen3.5-4b
 ```
 
 Stop an existing server on the same port first. Models and native settings are

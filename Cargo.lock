@@ -1935,6 +1935,7 @@ dependencies = [
  "jsonschema",
  "openjev-core",
  "openjev-llama",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

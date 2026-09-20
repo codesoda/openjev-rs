@@ -1,6 +1,6 @@
 # Resident Jev-compatible HTTP service
 
-`openjev --serve` is a local, supported subset of the Jev System One wire API.
+`openjev serve` is a local, supported subset of the Jev System One wire API.
 It loads and verifies one selected GGUF once, performs one disclosed warmup
 Choice, then serves all requests through one synchronous inference owner. It is
 not affiliated with TypeSafe AI and does not claim hosted Jev calibration,
@@ -10,18 +10,20 @@ quality, billing, latency, or numerical equivalence.
 
 ```sh
 # Existing Metal binary and verified cache; loopback needs no configured auth.
-openjev --serve --offline --model qwen3-0.6b \
+openjev serve --offline --model qwen3-0.6b \
   --host 127.0.0.1 --port 8080 --request-timeout-secs 120
 
 # A non-loopback listener is rejected unless a nonempty bearer secret is read
 # indirectly from an environment variable.
 export OPENJEV_API_KEY='replace-with-a-long-secret'
-openjev --serve --host 0.0.0.0 --api-key-env OPENJEV_API_KEY
+openjev serve --host 0.0.0.0 --api-key-env OPENJEV_API_KEY
 ```
 
 The default listener is `127.0.0.1:8080`. TLS belongs at a trusted reverse
-proxy. Wildcard CORS is not enabled. `--serve` cannot be combined with a CLI
-command or decision-output flags. Existing model, cache, offline, device,
+proxy. Wildcard CORS is not enabled. `serve` cannot be combined with another
+command or decision-output flags. Put server options such as `--host` and
+`--port` after `serve`. The former `--serve` flag is not supported in current
+source builds; historical v0.1.0 release artifacts still use that flag. Existing model, cache, offline, device,
 thread, context, batch, sequence, and `--require-shared` settings still apply.
 Startup binds first, then loads and warms the model; readiness and accepting
 begin only after load/warmup succeeds. stdout remains empty. Diagnostics go to

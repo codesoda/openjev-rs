@@ -1,5 +1,6 @@
 pub mod args;
 pub mod commands;
+mod demo;
 pub mod input;
 mod m6;
 mod m6_bench;
@@ -223,35 +224,9 @@ fn execute<R: Read, W: Write, E: Write>(
 ) -> Result<i32, CliError> {
     let pretty = cli.global.pretty;
     let compact = cli.global.compact;
-    let has_server_option = cli.host.is_some()
-        || cli.port.is_some()
-        || cli.request_timeout_secs.is_some()
-        || cli.api_key_env.is_some();
-    if cli.serve {
-        if cli.command.is_some() {
-            return Err(CliError::validation(
-                "--serve cannot be combined with a CLI command",
-            ));
-        }
-        server::validate_server_global_args(&cli.global)?;
-        let options = server::ServeOptions::from_cli(
-            cli.host,
-            cli.port,
-            cli.request_timeout_secs,
-            cli.api_key_env.as_deref(),
-        )?;
-        let require_shared = cli.global.require_shared;
-        let config = commands::scoring_config(&cli.global)?;
-        return server::run(config, options, require_shared).map(|()| 0);
-    }
-    if has_server_option {
-        return Err(CliError::validation(
-            "--host, --port, --request-timeout-secs, and --api-key-env require --serve",
-        ));
-    }
     let command = cli
         .command
-        .ok_or_else(|| CliError::usage("a command or --serve is required"))?;
+        .ok_or_else(|| CliError::usage("a command is required"))?;
     if compact
         && !matches!(
             &command,
@@ -377,6 +352,18 @@ fn execute<R: Read, W: Write, E: Write>(
                 models_probe(&cli.global, &id, mode, stdout, stderr)
             }
         },
+        Command::Serve(args) => {
+            server::validate_server_global_args(&cli.global)?;
+            let options = server::ServeOptions::from_cli(
+                args.host,
+                args.port,
+                args.request_timeout_secs,
+                args.api_key_env.as_deref(),
+            )?;
+            let config = commands::scoring_config(&cli.global)?;
+            server::run(config, options, cli.global.require_shared).map(|()| 0)
+        }
+        Command::Demo(args) => demo::execute(&cli.global, args, stdout, stderr),
         Command::Eval(args) => m6::execute_eval(&cli.global, args, pretty, stdout, stderr),
         Command::Bench(args) => m6_bench::execute_bench(&cli.global, args, pretty, stdout, stderr),
         Command::Calibrate(_) => {
@@ -1297,7 +1284,7 @@ mod tests {
     }
 
     #[test]
-    fn serve_alternative_and_server_only_flags_fail_before_model_loading() {
+    fn serve_subcommand_rejects_legacy_flag_and_misplaced_options_before_loading() {
         let (code, stdout, stderr) = invoke(&["openjev"]);
         assert_eq!(code, 2);
         assert!(stdout.is_null());
@@ -1305,9 +1292,20 @@ mod tests {
 
         for arguments in [
             vec!["openjev", "--host", "127.0.0.1", "models"],
-            vec!["openjev", "--serve", "models"],
-            vec!["openjev", "--serve", "--compact"],
-            vec!["openjev", "--serve", "--host", "0.0.0.0"],
+            vec!["openjev", "--serve"],
+            vec!["openjev", "serve", "models"],
+            vec!["openjev", "--port", "8080", "serve"],
+            vec!["openjev", "models", "--port", "8080"],
+        ] {
+            let (code, stdout, stderr) = invoke(&arguments);
+            assert_eq!(code, 2, "arguments: {arguments:?}");
+            assert!(stdout.is_null());
+            assert_eq!(stderr["error"]["code"], "usage");
+        }
+        for arguments in [
+            vec!["openjev", "serve", "--compact"],
+            vec!["openjev", "serve", "--pretty"],
+            vec!["openjev", "serve", "--host", "0.0.0.0"],
         ] {
             let (code, stdout, stderr) = invoke(&arguments);
             assert_eq!(code, 2, "arguments: {arguments:?}");

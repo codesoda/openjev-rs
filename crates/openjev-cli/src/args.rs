@@ -8,12 +8,13 @@ const ROOT_AFTER_HELP: &str = r#"Examples:
   printf '%s\n' '{"id":"d1","state":"ticket","question":"Which queue?","options":[{"id":"access","description":"Account access"},{"id":"billing","description":"Billing"}]}' | openjev --model qwen3-0.6b ask
   printf '%s\n' '{"id":"d1","state":"ticket","question":"Which queue?","options":[{"id":"access","description":"Account access"},{"id":"billing","description":"Billing"}]}' | openjev --model qwen3-0.6b run
   openjev models list
-  openjev --serve --offline --model qwen3-0.6b --host 127.0.0.1 --port 8080
+  openjev demo --pretty
+  openjev serve --offline --model qwen3-0.6b --host 127.0.0.1 --port 8080
 
 State text is never trimmed or guessed as JSON. Use --state-json or
 --state-json-file for structured state. stdout is JSON/JSONL only.
 --compact applies only to decide, noul, score, ask, and run.
---serve is an alternative to a command and keeps one verified model resident."#;
+serve keeps one verified model resident for HTTP requests."#;
 
 #[derive(Clone, Debug, Parser)]
 #[command(
@@ -25,21 +26,6 @@ State text is never trimmed or guessed as JSON. Use --state-json or
 pub struct Cli {
     #[command(flatten)]
     pub global: GlobalArgs,
-    /// Run the resident Jev-compatible HTTP service instead of a CLI command.
-    #[arg(long)]
-    pub serve: bool,
-    /// HTTP bind address (valid only with --serve).
-    #[arg(long)]
-    pub host: Option<std::net::IpAddr>,
-    /// HTTP bind port (valid only with --serve).
-    #[arg(long)]
-    pub port: Option<u16>,
-    /// Whole-request deadline in seconds (valid only with --serve).
-    #[arg(long)]
-    pub request_timeout_secs: Option<u64>,
-    /// Environment variable containing the bearer secret (valid only with --serve).
-    #[arg(long)]
-    pub api_key_env: Option<String>,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -107,6 +93,10 @@ pub enum Command {
     Ask(AskArgs),
     /// Score Decision JSONL in input order.
     Run(RunArgs),
+    /// Run the resident Jev-compatible HTTP service.
+    Serve(ServeArgs),
+    /// Run eight HTTP examples against an already-running Jev-compatible server.
+    Demo(DemoArgs),
     /// Inspect or populate the verified model cache.
     Models(ModelsArgs),
     /// Evaluate an embedded authored or perturbation fixture.
@@ -115,6 +105,41 @@ pub enum Command {
     Bench(BenchArgs),
     /// Fit temperature calibration (implemented in M7).
     Calibrate(CalibrateArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+#[command(
+    after_help = "Examples:\n  openjev serve\n  openjev serve --offline --model qwen3-0.6b --host 127.0.0.1 --port 8080\n  openjev serve --host 0.0.0.0 --api-key-env OPENJEV_API_KEY\n\nKeeps one verified model resident. Run openjev demo in another terminal."
+)]
+pub struct ServeArgs {
+    /// HTTP bind address.
+    #[arg(long)]
+    pub host: Option<std::net::IpAddr>,
+    /// HTTP bind port.
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// Whole-request deadline in seconds.
+    #[arg(long)]
+    pub request_timeout_secs: Option<u64>,
+    /// Environment variable containing the bearer secret.
+    #[arg(long)]
+    pub api_key_env: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+#[command(
+    after_help = "Examples:\n  # Terminal 1: openjev serve\n  # Terminal 2:\n  openjev demo --pretty\n  openjev demo --base-url http://127.0.0.1:9090 --api-key-env OPENJEV_API_KEY\n\nNo model is loaded by this command. Uses the resident model unless --model is set.\nResults are JSONL; --pretty emits one JSON array. Progress goes to stderr."
+)]
+pub struct DemoArgs {
+    /// Server origin, optionally ending in /v1.
+    #[arg(long, default_value = "http://127.0.0.1:8080")]
+    pub base_url: String,
+    /// Environment variable containing the server's bearer secret.
+    #[arg(long)]
+    pub api_key_env: Option<String>,
+    /// Per-example HTTP deadline, including queue time and response body.
+    #[arg(long, default_value_t = 130, value_parser = clap::value_parser!(u64).range(1..=600))]
+    pub timeout_secs: u64,
 }
 
 #[derive(Clone, Debug, Args)]
