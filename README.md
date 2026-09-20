@@ -81,59 +81,46 @@ The macOS binary is not Developer ID signed or notarized.
 
 ### Install the CLI
 
-Download your platform's archive and `SHA256SUMS` from the
-[GitHub release](https://github.com/codesoda/openjev-rs/releases/tag/v0.1.0).
-The repository is currently private, so your GitHub account must have access.
-
-The following installs **v0.1.0** into your home directory without `sudo`.
-It uses the [GitHub CLI](https://cli.github.com/); run `gh auth login` first if
-needed. It verifies the archive checksum and refuses to overwrite an existing
-installation—inspect and back up an existing `openjev` before replacing it.
+The installer downloads a prebuilt release, verifies its SHA-256 checksum, and
+installs it without `sudo`. With public GitHub access:
 
 ```sh
-(
-  set -eu
-  tag=v0.1.0
-  case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64) target=aarch64-apple-darwin ;;
-    Linux-x86_64) target=x86_64-unknown-linux-gnu ;;
-    *) echo 'No prebuilt binary for this platform.' >&2; exit 1 ;;
-  esac
-
-  root="openjev-${tag}-${target}"
-  archive="${root}.tar.gz"
-  work=$(mktemp -d)
-  trap 'rm -rf "$work"' EXIT
-  cd "$work"
-
-  gh release download "$tag" --repo codesoda/openjev-rs \
-    --pattern "$archive" --pattern SHA256SUMS
-  grep -F "  $archive" SHA256SUMS > selected.sha256
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum --check selected.sha256
-  else
-    shasum -a 256 --check selected.sha256
-  fi
-
-  destination="$HOME/.local/share/openjev/releases/$tag"
-  binary="$HOME/.local/bin/openjev"
-  if [ -e "$destination" ] || [ -L "$destination" ] || \
-     [ -e "$binary" ] || [ -L "$binary" ]; then
-    echo 'An installation already exists; inspect/back it up before replacing it.' >&2
-    exit 1
-  fi
-  mkdir -p "$destination" "$HOME/.local/bin"
-  tar -xzf "$archive" -C "$destination"
-  ln -s "$destination/$root/openjev" "$binary"
-  "$binary" --version
-)
-
-export PATH="$HOME/.local/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/codesoda/openjev-rs/main/install.sh | sh
 ```
 
-Add the `export PATH` line to your shell startup file if `~/.local/bin` is not
-already on your PATH. For manual installation, package contents, and platform
-details, see [Binary releases](docs/RELEASE.md).
+**This repository is currently private.** Until it is public, use an authenticated
+[GitHub CLI](https://cli.github.com/) account with repository access instead:
+
+```sh
+gh auth login
+gh api --hostname github.com -H 'Accept: application/vnd.github.raw' \
+  repos/codesoda/openjev-rs/contents/install.sh | sh
+```
+
+The installer uses authenticated `gh` for private release downloads when available;
+otherwise it uses `curl` for public releases. It installs the latest release by
+default. To pin a version, replace `| sh` with `| sh -s -- --version v0.1.0`.
+From a local checkout, `sh install.sh` performs the same prebuilt installation—it
+does not compile the project.
+
+- Versioned binaries and their license notices live under `~/.openjev/bin/`.
+- `~/.openjev/bin/openjev` selects the installed version.
+- `~/.local/bin/openjev` links to `~/.openjev/bin/openjev`.
+- On macOS, the installer clears `com.apple.quarantine` when present using
+  `xattr -d` on the verified executable before checking that it runs. It does not change global
+  Gatekeeper settings.
+
+Rerun the installer to upgrade; previous versioned payloads are retained. Unrelated
+existing files or symlinks are not overwritten. No shell startup file is edited.
+If `~/.local/bin` is not already on your PATH, add this to your shell configuration:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+openjev --version
+```
+
+See [the installer source](install.sh) before running it, or use the
+[manual installation instructions](docs/RELEASE.md). Model downloads are separate.
 
 ### Download a model
 
