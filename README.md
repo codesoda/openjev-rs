@@ -1,299 +1,515 @@
+<a id="readme-top"></a>
+
 # openjev-rs
 
-Rust port of the [openjev.com / SemIf](https://github.com/TheoLeeCJ/openjev)
-idea: Jev-style typed decisions (`Choice` / `Noul` / `Score`) read directly from
-the next-token option logits of a frozen open LLM (Qwen3-0.6B, MiniCPM5-2B,
-Qwen3.5-4B GGUF via llama.cpp), in one forward pass, with no generation.
+**Local typed decisions for scripts, applications, and AI agents.**
 
-- `todo.md` — the implementation brief (start here).
-- `PROMPT.md` — prompt for an agent session to plan + implement this repo.
-- `reference/semif-py/` — upstream Python/JS source, fixtures, published
-  results (MIT, © TheoLeeCJ).
-- `reference/gliner2-rs-notes/` — background on Jev, use cases, and how this
-  sits beside `gliner2-rs`.
+Run `openjev` once from the command line, or start `openjev --serve` to keep a
+model loaded behind a Jev-compatible HTTP API. Both return JSON—no generated
+prose to parse, and no hosted inference service required.
 
-Independent project. Not affiliated with or endorsed by TypeSafe AI or SemIf.
+[Download a release](https://github.com/codesoda/openjev-rs/releases)
+· [HTTP API documentation](docs/SERVE.md)
+· [Report a bug](https://github.com/codesoda/openjev-rs/issues)
+· [Request a feature](https://github.com/codesoda/openjev-rs/issues/new)
 
-## Current status
+## Table of contents
 
-M1 provides the backend-neutral core, exact restricted prompt renderers and
-schemas. M2 adds the pinned three-model registry, verified canonical cache and
-owner-thread native loader. M3 adds the complete production direct `Readout`
-and passed the strict cached Qwen3 authored144 plus perturbations108 prompt,
-token and slot gates.
+- [About the project](#about-the-project)
+  - [Built with](#built-with)
+- [Getting started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Install the CLI](#install-the-cli)
+  - [Download a model](#download-a-model)
+  - [Build from source](#build-from-source)
+- [Usage](#usage)
+  - [One-shot CLI](#one-shot-cli)
+  - [JSON and batch input](#json-and-batch-input)
+  - [Jev-compatible HTTP server](#jev-compatible-http-server)
+  - [Use the TypeSafe JavaScript SDK](#use-the-typesafe-javascript-sdk)
+- [Models](#models)
+- [Limitations](#limitations)
+- [Documentation](#documentation)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
+- [Acknowledgments](#acknowledgments)
 
-M4 exposes that production path through `openjev decide`, `noul`, `score`,
-`ask`, `run`, and `models list|pull|path`. M5 adds exact shared-prefix KV copy,
-independent packed batching, configuration-bound subprocess probes and local
-eligibility receipts. Input is fully validated before model load; stdout is
-JSON/JSONL only; native/progress/warning/error logs use stderr; file output is
-create-only. `run` writes and flushes each success or ErrorRecord before scoring
-the next row instead of retaining the run in memory. Noul and Score are
-transparent direct-Choice adapters, and opt-in confidence is the labelled
-uncalibrated normalized margin. A backend-disabled build parses and validates
-inputs but returns structured `backend_unavailable` rather than fake
-probabilities.
+## About the project
 
-The user-requested resident HTTP extension adds `openjev --serve`: one verified
-model is loaded and warmed once, then a bounded Jev-shaped API is served at
-`/v1/systemone`. The async HTTP frontend never makes the non-Send scorer shared;
-one dedicated synchronous owner thread retains it. See
-[`docs/SERVE.md`](docs/SERVE.md) for auth, deadlines, cancellation limits, wire
-mapping, conditional-probability disclosure, and the pinned official SDK smoke.
+OpenJev reads the next-token option logits from a frozen open language model
+using llama.cpp. It scores the supplied alternatives without generating an
+answer or chain of thought.
 
-Native shared/batch execution is never enabled merely because it compiled. A
-passing local receipt for the exact artifact, native pin, probe-suite version,
-device/offload, threads, context/batch/sequence settings and prompt profile is
-required. The
-retained Metal and true-CPU probes for all three pinned profiles failed the
-frozen numerical gates, so those twelve tested configurations intentionally
-remain on fresh serial full-prompt scoring. Requested/effective mode, the
-nonempty receipt failure, and `cache_hit=false` make that fallback visible;
-stderr warns even with `--quiet`. `--require-shared` fails before inference when
-no matching passing receipt exists. Eval/bench remain explicit M6
-not-implemented surfaces, and calibration/permutation/nondefault temperature
-remain M7.
+| Decision | Use it for | Result |
+| --- | --- | --- |
+| **Choice** | Routing a ticket or selecting a candidate | Selected option and probabilities |
+| **Noul** | A yes/no question | Probability assigned to yes |
+| **Score** | Rating against ordered levels | Probability-weighted expected value |
 
-MiniCPM5/Qwen3.5 have exact template hashes. Qwen3's GGUF and native templates
-are nonidentical; parent/Astra approved a manifest-keyed `reviewed-equivalent`
-status only for the restricted two-string-message, no-tools, disabled-thinking
-profile. Unseen registered hash triples remain failures. Custom local/Hub GGUFs
-require an explicit template profile and are labelled `override-unverified`,
-with no fabricated native reference or golden claim.
+Use the **CLI** for shell pipelines and one-off decisions. Use the **HTTP
+server** for repeated calls from applications or agents: it loads and warms one
+model once, then accepts requests through a bounded in-memory queue.
 
-Raw JSON input through the explicit parser or serde_json's string, slice, and
-reader routes accepts at most 128 nested arrays/objects per complete document
-and preserves source text for strict parsing. Thus lexical integer `-0`
-normalizes to `0`, while float spellings, overflow, and duplicate keys are
-rejected consistently. `StateValue::try_from(serde_json::Value)` is the bounded
-path for untrusted already-built trees; it validates depth iteratively but
-cannot recover discarded duplicate keys or a numeric lexeme normalized by the
-producer. Upstream generic operations that recursively serialize an
-arbitrary-depth `Value` first—including
-`serde_json::from_value::<StateValue>` with the `raw_value` feature and
-`Value::to_string()`—are outside this depth guarantee.
+This is an independent implementation inspired by [SemIf / openjev](https://github.com/TheoLeeCJ/openjev).
+It is not affiliated with or endorsed by TypeSafe AI or SemIf. Jev compatibility
+means the documented wire/API subset—not identical models, answers, or confidence.
 
-The core carries these limitations into future readouts:
+### Built with
 
-- A forced typed output can still be semantically wrong.
-- Softmax over allowed tokens is conditional on the supplied alternatives; it
-  is not calibrated operational confidence.
+- [Rust](https://www.rust-lang.org/)
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) through [llama-cpp-2](https://github.com/utilityai/llama-cpp-rs)
+- [Hugging Face Hub](https://huggingface.co/) for pinned, checksum-verified GGUF weights
+- [Axum](https://github.com/tokio-rs/axum) and [Tokio](https://tokio.rs/) for HTTP serving
 
-See `docs/PLAN.md` for the reviewed milestone contract,
-`docs/RESULTS.md` for runtime evidence, `schemas/readout-v1.schema.json` for the
-normative emitted-readout schema, and `schemas/commands-v1.schema.json` for M4
-command envelopes.
+## Getting started
 
-## Tagged binary releases
+### Prerequisites
 
-[`v0.1.0`](https://github.com/codesoda/openjev-rs/releases/tag/v0.1.0) is the
-first accepted binary release. The immutable tag points to
-`bb23406606e423fb35f5e62fdf5f170a6b14ad3f`: the
-[main CI run](https://github.com/codesoda/openjev-rs/actions/runs/35493609481)
-passed that exact commit, and the
-[tag CI run](https://github.com/codesoda/openjev-rs/actions/runs/35494477837)
-passed native macOS/Linux build, test, linkage, package, and publication jobs.
-The release provides Apple Silicon macOS 14+ (Metal) and x86-64 Linux/glibc
-2.35+ (CPU) archives plus `SHA256SUMS`.
+For a prebuilt binary, **no Rust, Python, compiler, or Xcode installation is
+needed**.
 
-Both archives and `SHA256SUMS` were downloaded from the GitHub Release with
-`gh release download`; the checksum file, GitHub asset digests, package
-manifests, and macOS linkage were verified. The unchanged macOS payload is
-installed at
-`~/.local/share/openjev/releases/v0.1.0/openjev-v0.1.0-aarch64-apple-darwin/`,
-with `~/.local/bin/openjev` as its PATH-visible symlink. No pre-existing binary
-was replaced. The installed binary reports version `0.1.0` and has SHA-256
-`b9999f65f936fdd17e193af90e57bd568c2888f98889b15c3ce98d1a319fc66a`.
+| Release target | Requirements |
+| --- | --- |
+| Apple Silicon macOS | macOS 14 or newer; Metal acceleration included |
+| Linux x86-64 | glibc 2.35 or newer; system `libstdc++` and `libgcc`; CPU inference |
 
-A real offline cached-Qwen smoke of that installed downloaded binary passed on
-Apple M3 Pro with explicit Metal: eight raw HTTP checks, three equal decoded
-JSON Choice/Noul/Score response bodies from one resident load, wrong-key 401,
-unknown-model 404, unsupported-float 422, empty stdout, and clean SIGTERM. The
-pinned official `@typesafe-ai/sdk` 0.6.0 smoke also passed. Raw HTTP usage was
-313 input / 0 output tokens; the SDK request reported 338 / 0. Requests
-explicitly disclosed shared-to-serial full-prompt fallback. This is release
-identity, packaging, residency, and bounded protocol evidence—not an
-acceleration, performance, numerical-parity, Linux model-inference, Apple
-signing/notarization, or M6/M7 completion claim. Linux help/version/linkage and
-packaging ran in CI; the downloaded Linux archive was not executed on the local
-Mac.
+You need internet access for the initial binary/model download and enough disk
+space for your chosen model. Model weights are not included in the binary archive.
+The macOS binary is not Developer ID signed or notarized.
 
-Each release archive contains the executable, the project license/attribution
-file, a complete `THIRD_PARTY_LICENSES.html` dependency notice bundle, the
-official Rust 1.95.0 library/runtime `RUST-COPYRIGHT-library.html` notices, the
-complete unmodified `colored-3.1.1.crate` and `option-ext-0.2.0.crate`
-MPL-2.0 covered-source archives, runtime documentation, and `BUILD-INFO.json`;
-model weights and cache data are never packaged. CI executes the extracted
-binary from a temporary directory outside the checkout and checks that native
-dynamic dependencies resolve only to operating-system libraries. The macOS
-binary embeds its Metal library, but is not Developer ID signed or Apple
-notarized. Running either packaged binary requires no Python, CMake, compiler,
-Xcode, or Homebrew.
+### Install the CLI
 
-See [`docs/RELEASE.md`](docs/RELEASE.md) for verification and installation, and
-[`docs/results/releases/v0.1.0-downloaded-metal/`](docs/results/releases/v0.1.0-downloaded-metal/)
-for retained acceptance evidence. The immutable release source is the tagged
-commit above; the evidence directory belongs to the separate documentation-only
-follow-up on `main`, not to the release tag.
+Download your platform's archive and `SHA256SUMS` from the
+[GitHub release](https://github.com/codesoda/openjev-rs/releases/tag/v0.1.0).
+The repository is currently private, so your GitHub account must have access.
 
-## Build and install the M5 CLI
-
-The ordinary workspace build deliberately excludes llama.cpp:
+The following installs **v0.1.0** into your home directory without `sudo`.
+It uses the [GitHub CLI](https://cli.github.com/); run `gh auth login` first if
+needed. It verifies the archive checksum and refuses to overwrite an existing
+installation—inspect and back up an existing `openjev` before replacing it.
 
 ```sh
-cargo build
-# Parsing/help/models-list work; scoring returns backend_unavailable.
+(
+  set -eu
+  tag=v0.1.0
+  case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64) target=aarch64-apple-darwin ;;
+    Linux-x86_64) target=x86_64-unknown-linux-gnu ;;
+    *) echo 'No prebuilt binary for this platform.' >&2; exit 1 ;;
+  esac
+
+  root="openjev-${tag}-${target}"
+  archive="${root}.tar.gz"
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  cd "$work"
+
+  gh release download "$tag" --repo codesoda/openjev-rs \
+    --pattern "$archive" --pattern SHA256SUMS
+  grep -F "  $archive" SHA256SUMS > selected.sha256
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum --check selected.sha256
+  else
+    shasum -a 256 --check selected.sha256
+  fi
+
+  destination="$HOME/.local/share/openjev/releases/$tag"
+  binary="$HOME/.local/bin/openjev"
+  if [ -e "$destination" ] || [ -L "$destination" ] || \
+     [ -e "$binary" ] || [ -L "$binary" ]; then
+    echo 'An installation already exists; inspect/back it up before replacing it.' >&2
+    exit 1
+  fi
+  mkdir -p "$destination" "$HOME/.local/bin"
+  tar -xzf "$archive" -C "$destination"
+  ln -s "$destination/$root/openjev" "$binary"
+  "$binary" --version
+)
+
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Use the existing device-specific target directory for a native CLI. On Apple
-Silicon, the Metal build defaults to Metal with all layers requested. A true
-CPU build defaults to CPU, requests zero GPU layers, and disables KQV/op
-offload. Do not share one target directory between those native configurations.
+Add the `export PATH` line to your shell startup file if `~/.local/bin` is not
+already on your PATH. For manual installation, package contents, and platform
+details, see [Binary releases](docs/RELEASE.md).
 
-```sh
-# Metal
-GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal \
-  cargo build --release -p openjev-cli --features metal
-install -m 0755 target-m2-metal/release/openjev "$HOME/.local/bin/openjev"
+### Download a model
 
-# True CPU on macOS
-GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu \
-  cargo build --release -p openjev-cli --features native
-```
-
-The product default model remains `minicpm5-2b`. The examples use cached
-`qwen3-0.6b` for fast local exercise:
-
-```sh
-# State from a flag; strings are not trimmed.
-openjev --offline --model qwen3-0.6b decide \
-  --state 'customer cannot sign in' \
-  --question 'Which queue?' --option 'Account access' --option Billing
-
-# State from stdin. Structured state requires --state-json/--state-json-file.
-printf 'suspicious message\n' | openjev --offline --model qwen3-0.6b noul \
-  --question 'Is this phishing?'
-
-openjev --offline --model qwen3-0.6b score --state-json '{"severity": 3}' \
-  --question 'How urgent?' --level low --level medium --level high \
-  --level-value 0 --level-value 5 --level-value 10
-
-printf '%s\n' \
-  '{"id":"d1","state":"ticket","question":"Queue?","options":[{"id":"access","description":"Account access"},{"id":"billing","description":"Billing"}]}' \
-  | openjev --offline --model qwen3-0.6b ask
-
-openjev --offline --model qwen3-0.6b run \
-  --input decisions.jsonl --output new-results.jsonl
-openjev models list
-openjev --offline models path qwen3-0.6b
-
-# Resident loopback API. The official SDK baseURL is this root URL; it appends /v1.
-openjev --serve --offline --model qwen3-0.6b --host 127.0.0.1 --port 8080
-```
-
-The resident service exposes `POST /v1/systemone`, `GET /v1/models`,
-`GET /healthz`, and `GET /readyz`. Loopback may run without configured auth;
-non-loopback binding requires `--api-key-env NAME`. Bodies are capped at 1 MiB,
-admission at 16 jobs, and the whole-request deadline defaults to 120 seconds.
-The model is loaded exactly once and native decode remains noninterruptible.
-See [`docs/SERVE.md`](docs/SERVE.md) for the supported Jev subset and
-`scripts/sdk-compat/` for the exact `@typesafe-ai/sdk` 0.6.0 smoke source.
-
-Exactly one state source is accepted for `decide`/`noul`/`score`:
-`--state`, `--state-file`, `--state-json`, `--state-json-file`, or non-TTY
-stdin. Explicit state never reads stdin. A TTY without state is an error.
-`ask` takes one complete Decision object; `run` takes JSONL, ignores blank
-lines, preserves row order, emits and flushes per-row runtime errors and
-continues, then exits 1 if any row failed. Add `--compact --quiet` for a small
-LLM/script-oriented decision projection while suppressing routine native INFO
-logs:
-
-```sh
-openjev --compact --quiet --offline --model qwen3-0.6b decide \
-  --state 'customer cannot sign in' \
-  --question 'Which queue?' --option Access --option Billing
-```
-
-Full `openjev-readout-v1` remains the default. Compact output applies only to
-`decide`, `noul`, `score`, `ask`, and `run`; it retains semantic option arrays,
-the exact probability honesty label, primitive-specific values, requested
-confidence, and a small execution object only on fallback. `--quiet` still
-retains WARN/ERROR and explicit fallback warnings. See
-[`docs/COMPACT.md`](docs/COMPACT.md) and
-[`schemas/compact-v1.schema.json`](schemas/compact-v1.schema.json).
-
-Fatal parse/validation errors exit 2 before native loading. For `run --output`, the create-only destination is
-reserved after complete input validation but before model startup. A startup
-failure therefore leaves a new empty file; later output failure leaves the
-already flushed prefix, stops further inference, shuts down the owner worker,
-and emits no completed write summary. The summary is written only after every
-row and file sync complete. `--pretty` is only for a single object and is
-rejected for JSONL.
-
-Pinned pulls use the canonical cache (`--cache-dir`, then `$OPENJEV_HOME`, then
-`~/.cache/openjev`) and verify complete size plus SHA-256. Registered and custom
-Hub downloads preflight canonical containment of the Hub lock, repository,
-blob, snapshot, and negative-cache parents before hf-hub can mutate them, then
-require the returned regular file to remain inside the owned Hub. `models path`
-emits a JSON envelope, never a bare path. Examples:
+Start with the smallest model to try the CLI:
 
 ```sh
 openjev models pull qwen3-0.6b
+```
+
+Downloads are pinned and verified by size and SHA-256. The default cache is
+`~/.cache/openjev`; change it with `--cache-dir PATH` or `OPENJEV_HOME`.
+Once the model is cached, `--offline` prevents model downloads.
+
+### Build from source
+
+<details>
+<summary>Optional: build a native CLI instead of downloading a release</summary>
+
+Requires Rust 1.95+, CMake, and a C/C++ toolchain with clang/libclang. On macOS,
+install Xcode Command Line Tools and CMake. On Ubuntu, the native prerequisites
+include `build-essential clang libclang-dev cmake pkg-config`.
+
+```sh
+git clone https://github.com/codesoda/openjev-rs.git
+cd openjev-rs
+
+# Apple Silicon: Metal acceleration, with the Metal library embedded.
+GGML_METAL=ON GGML_METAL_EMBED_LIBRARY=ON CARGO_TARGET_DIR=target-m2-metal \
+  cargo build --locked --release -p openjev-cli --features metal
+
+# Alternatively, a CPU-only build on Linux or macOS.
+GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu \
+  cargo build --locked --release -p openjev-cli --features native
+```
+
+Run `target-m2-metal/release/openjev` or `target-m2-cpu/release/openjev` directly,
+or install your chosen executable on PATH. Keep CPU and Metal builds in separate
+target directories. Plain `cargo build` deliberately omits the native backend:
+help and validation work, but inference returns `backend_unavailable`.
+
+</details>
+
+## Usage
+
+### One-shot CLI
+
+These examples use the model downloaded above. A one-shot invocation loads the
+model and exits after returning its result. For repeated calls, use
+[`--serve`](#jev-compatible-http-server) instead.
+
+**Choose an option:**
+
+```sh
+openjev --offline --model qwen3-0.6b --compact --quiet --pretty decide \
+  --state 'The customer was charged twice for their subscription.' \
+  --question 'Which team should handle this ticket?' \
+  --option Billing --option Support --option Sales
+```
+
+**Ask a yes/no question, with state piped from stdin:**
+
+```sh
+printf '%s' 'The customer explicitly asks for a refund.' | \
+  openjev --offline --model qwen3-0.6b --compact --quiet noul \
+    --question 'Does the customer request a refund?'
+```
+
+**Score against named levels and numeric values:**
+
+```sh
+openjev --offline --model qwen3-0.6b --compact --quiet --pretty score \
+  --state-json '{"incident":"Checkout is unavailable","severity":3}' \
+  --question 'How urgent is this incident?' \
+  --level low --level medium --level high \
+  --level-value 0 --level-value 5 --level-value 10
+```
+
+| Option | Purpose |
+| --- | --- |
+| `--compact` | Smaller decision JSON for code or an LLM; omits full model/runtime diagnostics |
+| `--pretty` | Indented JSON for a single result; not supported for JSONL or multiple questions |
+| `--quiet` | Suppress routine logs; warnings and errors remain on stderr |
+| `--confidence` | Include the explicitly uncalibrated confidence value |
+| `--state-file PATH` | Read state as text from a file |
+| `--state-json-file PATH` | Read structured JSON state from a file |
+| `--device metal` / `--device cpu` | Explicitly select a backend supported by your build |
+
+Supply exactly one state source, or pipe text through stdin. Text is not guessed
+as JSON: use `--state-json` or `--state-json-file` for structured input.
+**stdout is JSON/JSONL only; diagnostics go to stderr.** Full diagnostic readouts
+are the default; compact CLI output is an OpenJev schema, not the Jev HTTP schema.
+See [Compact output](docs/COMPACT.md) for its fields.
+
+Help is also a JSON object. To display its human-readable text with optional
+[`jq`](https://jqlang.github.io/jq/):
+
+```sh
+openjev --help | jq -r .text
+openjev decide --help | jq -r .text
+```
+
+### JSON and batch input
+
+Use `ask` for one complete decision object:
+
+```sh
+printf '%s\n' \
+  '{"id":"ticket-1","state":"I was charged twice.","question":"Which queue?","options":[{"id":"billing","description":"Payments and invoices"},{"id":"support","description":"Product support"}]}' \
+  | openjev --offline --model qwen3-0.6b --compact --quiet ask
+```
+
+Use `run` for a JSONL file containing one such object per line:
+
+```sh
+openjev --offline --model qwen3-0.6b --compact --quiet run \
+  --input decisions.jsonl --output results.jsonl
+```
+
+The output file must not already exist. Omit `--output` to stream JSONL to
+stdout. Rows preserve input order; per-row inference errors are emitted and
+processing continues. Exit codes: **0** success, **1** runtime failure (including
+any failed batch row), **2** invalid arguments/input. `--pretty` is not valid for
+`run`.
+
+### Jev-compatible HTTP server
+
+Start a resident server with the cached model:
+
+```sh
+openjev --serve --offline --model qwen3-0.6b \
+  --host 127.0.0.1 --port 8080
+```
+
+The model is loaded and warmed once. The default address is
+`http://127.0.0.1:8080`. Leave this process running and send requests from another
+terminal:
+
+```sh
+curl --fail-with-body --silent --show-error http://127.0.0.1:8080/readyz
+
+curl --fail-with-body --silent --show-error \
+  http://127.0.0.1:8080/v1/systemone \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+    "model": "jev-latest",
+    "state": {"ticket": "duplicate charge", "severity": 3},
+    "questions": {
+      "route": {
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "criteria": {"billing": "Payments and invoices", "support": "Product support"}
+      },
+      "review": {
+        "type": "noul",
+        "instructions": "Does a human need to review this?"
+      },
+      "urgency": {
+        "type": "score",
+        "instructions": "How urgent is this?",
+        "criteria": ["low", "medium", "high"]
+      }
+    }
+  }'
+```
+
+Response shape (**illustrative values**, not a promised prediction):
+
+```json
+{
+  "model": "qwen3-0.6b",
+  "answers": {
+    "route": {
+      "type": "choice",
+      "choice": "billing",
+      "confidence": 0.8,
+      "probabilities": {"billing": 0.9, "support": 0.1}
+    },
+    "review": {"type": "noul", "noul": 0.75},
+    "urgency": {
+      "type": "score",
+      "score": 1.2,
+      "confidence": 0.25,
+      "legend": {"0": "low", "1": "medium", "2": "high"},
+      "probabilities": {"0": 0.15, "1": 0.5, "2": 0.35}
+    }
+  },
+  "usage": {"input_tokens": 313, "output_tokens": 0}
+}
+```
+
+`jev-latest` is an accepted alias for the **locally loaded model**, not a call to
+hosted Jev. The response reports that model's actual identity. HTTP Score uses
+the expected zero-based level index; it does not accept the CLI's custom level
+values. `output_tokens` is zero because there is no generation.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v1/systemone` | Evaluate typed questions against a state |
+| `GET /v1/models` | List the one resident model |
+| `GET /healthz` | Health check |
+| `GET /readyz` | Readiness check |
+
+**Serving behavior:** up to 16 requests are admitted across body reading,
+queuing, and inference. One inference worker processes jobs sequentially;
+HTTP handlers await replies asynchronously. The queue is in memory, not
+persistent. The default 120-second deadline includes queue time; overload
+returns HTTP 429. Stop the server with Ctrl+C or SIGTERM. Native inference
+cannot be interrupted mid-decode.
+
+**Network access:** loopback needs no API key. Binding outside loopback requires
+a bearer secret; terminate TLS at a trusted reverse proxy rather than exposing
+unencrypted HTTP publicly.
+
+```sh
+export OPENJEV_API_KEY='replace-with-a-long-random-secret'
+openjev --serve --offline --model qwen3-0.6b \
+  --host 0.0.0.0 --port 8080 --api-key-env OPENJEV_API_KEY
+```
+
+Clients must then send `Authorization: Bearer <your-secret>` to inference and
+model routes. See [HTTP API documentation](docs/SERVE.md) for all limits,
+errors, auth behavior, and cancellation details.
+
+### Use the TypeSafe JavaScript SDK
+
+The supported subset has been smoke-tested with `@typesafe-ai/sdk` **0.6.0**.
+In a Node.js project:
+
+```sh
+npm install @typesafe-ai/sdk@0.6.0
+```
+
+Save as `example.mjs` and run with `node example.mjs` while the server is running:
+
+```js
+import { TypeSafeClient, choice, noul, score } from "@typesafe-ai/sdk";
+
+const client = new TypeSafeClient({
+  apiKey: process.env.OPENJEV_API_KEY || "local-dummy-token",
+  baseURL: "http://127.0.0.1:8080",
+  timeout: 120_000,
+  retry: { maxRetries: 0 },
+});
+
+const result = await client.systemOne({
+  model: "jev-latest",
+  state: { ticket: "The customer was charged twice." },
+  questions: {
+    route: choice("Which team?", { billing: "Payments", support: "Product support" }),
+    review: noul("Does a human need to review this?"),
+    urgency: score("How urgent?", ["low", "medium", "high"]),
+  },
+});
+
+console.log(JSON.stringify(result, null, 2));
+```
+
+**Use the server root as `baseURL`, without `/v1`.** This SDK appends the API
+path itself. Use a dummy key only for an unauthenticated loopback server;
+otherwise pass the configured secret. Request/response compatibility does not
+imply the same predictions as hosted Jev.
+
+## Models
+
+| Model ID | Quantization | Approx. download | When to try it |
+| --- | --- | --- | --- |
+| `qwen3-0.6b` | Q8_0 | 0.64 GB | Smallest download; quick local experiments |
+| `minicpm5-2b` | Q4_K_M | 1.56 GB | Middle size; default when `--model` is omitted |
+| `qwen3.5-4b` | Q4_K_M | 3.01 GB | Strongest results on our recorded decision fixtures; slower |
+
+Download size is not runtime memory usage. To use the larger model:
+
+```sh
+openjev models pull qwen3.5-4b
+openjev --serve --offline --model qwen3.5-4b
+```
+
+Stop an existing server on the same port first. Models and native settings are
+selected at startup; restart to change them. Inspect available/cached models:
+
+```sh
+openjev models list
 openjev --offline models path qwen3-0.6b
-
-# Local custom artifact: expected hash is optional; omission is honestly
-# labelled local-unverified. The file is hashed in place and never moved.
-openjev --model /models/custom.gguf --template-profile qwen3 decide ...
-
-# Remote custom artifact: commit, expected hash, and profile are mandatory.
-openjev --model 'hf:owner/repo@0123456789abcdef0123456789abcdef01234567:model.gguf' \
-  --model-sha256 64-lowercase-hex --template-profile qwen3 decide ...
 ```
 
-## M2 native smoke commands
+See [recorded evaluation and benchmark results](docs/PROGRESS.md#m6--bounded-measurement-checkpoint-and-handoff-status)
+and [runtime evidence](docs/RESULTS.md). Fixture scores are not guarantees on
+your application's data.
 
-Metal and CPU must use separate target directories because Apple CMake defaults
-Metal independently of Cargo's default features:
+## Limitations
+
+- **Typed output can still be wrong.** Probabilities are conditional on the
+  supplied alternatives and are not calibrated operational confidence.
+- **Shared execution currently falls back to serial on tested profiles.**
+  Weights remain loaded in server mode, but questions reprocess their full
+  prompts. Fallback is disclosed in HTTP headers/CLI metadata and stderr.
+  `--require-shared` rejects requests that cannot use an eligible shared path.
+- **This is a supported Jev API subset, not a universal drop-in replacement.**
+  HTTP accepts at most 64 questions; Choice has 1–16 options, Score 2–16 levels.
+  Request bodies are limited to 1 MiB. Duplicate JSON keys and floating-point
+  input numbers are rejected; integer values are supported. Full rules are in
+  [SERVE.md](docs/SERVE.md) and the [HTTP schema](schemas/jev-http-v1.schema.json).
+- **Validation coverage differs by platform.** The downloaded macOS release
+  passed real Metal HTTP/SDK smoke tests. Linux release CI checked builds,
+  tests, packaging, and linkage—not model inference. No HTTP load-performance
+  guarantee is claimed.
+- **Some advertised CLI surfaces are still planned.** Calibration, permutation
+  averaging, and nondefault temperature settings are not implemented. Eval and
+  bench exist, but the full benchmark milestone remains incomplete.
+
+## Documentation
+
+| Document | Contents |
+| --- | --- |
+| [HTTP API](docs/SERVE.md) | Wire semantics, limits, authentication, lifecycle, SDK compatibility |
+| [Binary releases](docs/RELEASE.md) | Platforms, checksum verification, package contents |
+| [Compact output](docs/COMPACT.md) | Small CLI response format for scripts and LLMs |
+| [JSON schemas](schemas/) | CLI readouts, compact output, HTTP requests/responses |
+| [Results](docs/RESULTS.md) | Parity, runtime checks, and release acceptance evidence |
+| [Progress](docs/PROGRESS.md) | Measured benchmarks and implementation history |
+| [Plan](docs/PLAN.md) / [brief](todo.md) | Architecture, requirements, and remaining work |
+
+## Roadmap
+
+- [x] Typed CLI decisions with pinned, verified GGUF models.
+- [x] Apple Silicon Metal and Linux CPU release binaries.
+- [x] Resident Jev-compatible HTTP subset and official SDK smoke tests.
+- [x] Compact JSON output and eval/bench commands.
+- [ ] Complete the evaluation and CPU/Metal benchmark matrix.
+- [ ] Enable shared/batched execution only after its correctness gates pass.
+- [ ] Add permutation averaging and temperature calibration.
+- [ ] Broaden real-model platform and concurrent HTTP validation.
+
+See [open issues](https://github.com/codesoda/openjev-rs/issues) and
+[the implementation brief](todo.md) for details.
+
+## Contributing
+
+Open an issue to discuss significant changes, then submit a focused pull request
+with tests. From a source checkout, run:
 
 ```sh
-# Accelerated build: all model layers requested on Metal.
-OPENJEV_INTEGRATION=1 GGML_METAL=ON CARGO_TARGET_DIR=target-m2-metal \
-  cargo run -p openjev-llama --features metal --example m2_smoke -- \
-  --all --device metal --gpu-layers all
-
-# True CPU build: no Metal backend and no GPU/KQV/op offload.
-OPENJEV_INTEGRATION=1 GGML_METAL=OFF CARGO_TARGET_DIR=target-m2-cpu \
-  cargo run -p openjev-llama --features native --example m2_smoke -- \
-  --all --offline --device cpu --gpu-layers 0
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
-M5 probes run in a subprocess. Before launch, the parent establishes and locks
-the exact receipt key and suspends any prior authorization. A crash, malformed
-or nonzero passing report, or publication failure leaves that key suspended;
-only a fully validated exact passing child result replaces eligibility. Failed
-receipts may remain as diagnostics but are not eligible. Probe both modes
-independently because eligibility is mode-specific:
+Ordinary tests do not download or load models. Native model integration tests
+are opt-in with the `integration` feature and `OPENJEV_INTEGRATION=1`; consult
+the [plan](docs/PLAN.md) and [results](docs/RESULTS.md) before running them.
+Keep CLI stdout machine-readable, preserve pinned reference semantics, and do
+not weaken parity gates to enable an optimization.
 
-```sh
-openjev --offline --device metal models probe qwen3-0.6b --mode shared
-openjev --offline --device metal models probe qwen3-0.6b --mode batch
-```
+## License
 
-A failed probe exits 1 with an `openjev-probe-report-v1` JSON object on stdout;
-a passing probe exits 0. Standard scoring never silently reprobes or relaxes
-the frozen `1e-3` slot-logit / `1e-4` probability / identical-first-argmax
-gates. See `docs/RESULTS.md` and `docs/results/m5/` for the twelve finalized
-`*-final.json` reports, preserved pre-final captures, and exact reproduction
-commands.
+Project code is distributed under the **MIT License**. See [LICENSE](LICENSE).
+Model weights have their own terms. Third-party dependencies, upstream credits,
+and the notices shipped with binaries are documented in [THIRD_PARTY.md](THIRD_PARTY.md)
+and [the release guide](docs/RELEASE.md).
 
-Integration runs are explicit and may download only when `--offline` is absent.
-Ordinary `cargo test --workspace` never downloads a model. The canonical cache
-is `--cache-dir` (API/harness), then `$OPENJEV_HOME`, then
-`~/.cache/openjev`; GGUFs remain outside the repository.
+## Contact
 
-The opt-in Qwen template oracle requires Jinja2 3.1.4 and performs no network
-access:
+Project: [codesoda/openjev-rs](https://github.com/codesoda/openjev-rs)
 
-```sh
-python3 scripts/verify_qwen_template_equivalence.py
-```
+For bugs, questions, and feature requests, use
+[GitHub Issues](https://github.com/codesoda/openjev-rs/issues).
+
+## Acknowledgments
+
+- [TheoLeeCJ / SemIf](https://github.com/TheoLeeCJ/openjev) for the upstream
+  decision-readout approach, Python reference, and evaluation fixtures.
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) and
+  [llama-cpp-rs](https://github.com/utilityai/llama-cpp-rs) for local inference.
+- The Qwen and MiniCPM teams, and the GGUF publishers listed in
+  [the model manifest](manifests/models.json).
+- [Best-README-Template](https://github.com/othneildrew/Best-README-Template)
+  for the organization of this README.
+
+[Back to top](#readme-top)
