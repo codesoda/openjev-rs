@@ -1,0 +1,271 @@
+name: CI and tagged releases
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-package:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            expected_arch: arm64
+            package_features: metal
+            workspace_features: openjev-cli/metal,openjev-cli/integration
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            expected_arch: x86_64
+            package_features: native
+            workspace_features: openjev-cli/native,openjev-cli/integration
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: 1.95.0
+      CARGO_BUILD_JOBS: "2"
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+    steps:
+      - name: Check out the event commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify event commit and runner architecture
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.expected_arch }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -m)" = "$EXPECTED_ARCH"
+          git diff --exit-code
+
+      - name: Install Rust 1.95.0 components
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup toolchain install 1.95.0 --no-self-update --component rustfmt --component clippy
+          rustc --version
+          cargo --version
+
+      - name: Install Linux native build prerequisites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential clang libclang-dev cmake pkg-config
+
+      - name: Configure portable native build
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          echo "OPENJEV_HOME=$RUNNER_TEMP/openjev-no-models" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            {
+              echo 'GGML_METAL=ON'
+              echo 'GGML_METAL_EMBED_LIBRARY=ON'
+              echo 'GGML_NATIVE=OFF'
+              echo 'MACOSX_DEPLOYMENT_TARGET=14.0'
+              echo 'CMAKE_OSX_DEPLOYMENT_TARGET=14.0'
+            } >> "$GITHUB_ENV"
+          else
+            {
+              echo 'GGML_METAL=OFF'
+              echo 'GGML_NATIVE=OFF'
+              echo 'GGML_SSE42=OFF'
+              echo 'GGML_AVX=OFF'
+              echo 'GGML_AVX_VNNI=OFF'
+              echo 'GGML_AVX2=OFF'
+              echo 'GGML_BMI2=OFF'
+              echo 'GGML_AVX512=OFF'
+              echo 'GGML_AVX512_VBMI=OFF'
+              echo 'GGML_AVX512_VNNI=OFF'
+              echo 'GGML_AVX512_BF16=OFF'
+              echo 'GGML_FMA=OFF'
+              echo 'GGML_F16C=OFF'
+              echo 'RUSTFLAGS=-Ctarget-cpu=x86-64'
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Validate release ref and packaging tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release.py validate-ref --ref "$GITHUB_REF"
+          python3 -m unittest discover -s scripts/tests -p 'test_release.py' -v
+
+      - name: Check formatting
+        shell: bash
+        run: cargo fmt --all -- --check
+
+      - name: Clippy native workspace
+        shell: bash
+        env:
+          WORKSPACE_FEATURES: ${{ matrix.workspace_features }}
+        run: |
+          set -euo pipefail
+          unset OPENJEV_INTEGRATION
+          cargo clippy --locked --workspace --all-targets --features "$WORKSPACE_FEATURES" -- -D warnings
+
+      - name: Test native workspace without model integration
+        shell: bash
+        env:
+          WORKSPACE_FEATURES: ${{ matrix.workspace_features }}
+        run: |
+          set -euo pipefail
+          unset OPENJEV_INTEGRATION
+          cargo test --locked --workspace --all-targets --features "$WORKSPACE_FEATURES"
+          test -z "$(find "$OPENJEV_HOME" -type f -name '*.gguf' -print -quit 2>/dev/null || true)"
+
+      - name: Build release executable
+        shell: bash
+        env:
+          PACKAGE_FEATURES: ${{ matrix.package_features }}
+        run: cargo build --locked --release -p openjev-cli --features "$PACKAGE_FEATURES"
+
+      - name: Verify native CMake release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache=$(find target/release/build -path '*/llama-cpp-sys-2-*/out/build/CMakeCache.txt' -print -quit)
+          test -n "$cache"
+          grep -Fqx 'BUILD_SHARED_LIBS:BOOL=OFF' "$cache"
+          grep -Fqx 'GGML_BLAS:BOOL=OFF' "$cache"
+          grep -Fqx 'GGML_OPENMP:BOOL=OFF' "$cache"
+          grep -Fqx 'GGML_NATIVE:BOOL=OFF' "$cache"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            grep -Fqx 'GGML_METAL:BOOL=ON' "$cache"
+            grep -Fqx 'GGML_METAL_EMBED_LIBRARY:BOOL=ON' "$cache"
+            grep -Fqx 'CMAKE_OSX_DEPLOYMENT_TARGET:STRING=14.0' "$cache"
+          else
+            for option in GGML_SSE42 GGML_AVX GGML_AVX_VNNI GGML_AVX2 GGML_BMI2 \
+              GGML_AVX512 GGML_AVX512_VBMI GGML_AVX512_VNNI GGML_AVX512_BF16 \
+              GGML_FMA GGML_F16C; do
+              grep -Fqx "$option:BOOL=OFF" "$cache"
+            done
+          fi
+
+      - name: Package and smoke outside checkout
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          rust_version=$(rustc --version)
+          archive=$(python3 scripts/release.py package \
+            --binary target/release/openjev \
+            --target "$RELEASE_TARGET" \
+            --source-sha "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH" \
+            --rust-version "$rust_version" \
+            --workflow-run-url "$WORKFLOW_RUN_URL" \
+            --output-dir dist)
+          python3 scripts/release.py verify \
+            --archive "$archive" \
+            --expected-target "$RELEASE_TARGET" \
+            --expected-source-sha "$GITHUB_SHA" \
+            --check-linkage
+
+      - name: Upload ordinary workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: openjev-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish-release:
+    name: Publish immutable tag assets
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build-test-package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the tag commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Download macOS archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: openjev-aarch64-apple-darwin
+          path: dist
+
+      - name: Download Linux archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: openjev-x86_64-unknown-linux-gnu
+          path: dist
+
+      - name: Verify tag, archives, and checksums
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-list -n 1 "$GITHUB_REF")" = "$GITHUB_SHA"
+          python3 scripts/release.py validate-ref --ref "$GITHUB_REF" --require-tag
+          version=${TAG#v}
+          mac_archive="dist/openjev-v${version}-aarch64-apple-darwin.tar.gz"
+          linux_archive="dist/openjev-v${version}-x86_64-unknown-linux-gnu.tar.gz"
+          python3 scripts/release.py verify --archive "$mac_archive" \
+            --expected-version "$version" --expected-target aarch64-apple-darwin \
+            --expected-source-sha "$GITHUB_SHA" --skip-execute
+          python3 scripts/release.py verify --archive "$linux_archive" \
+            --expected-version "$version" --expected-target x86_64-unknown-linux-gnu \
+            --expected-source-sha "$GITHUB_SHA" --skip-execute
+          python3 scripts/release.py checksums --output dist/SHA256SUMS "$mac_archive" "$linux_archive"
+          (cd dist && sha256sum --check SHA256SUMS)
+
+      - name: Publish GitHub Release once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists; refusing to overwrite immutable assets" >&2
+            exit 1
+          fi
+          version=${TAG#v}
+          notes=$(mktemp)
+          trap 'rm -f "$notes"' EXIT
+          printf '%s\n' \
+            "Automated openjev binary release from commit \`$GITHUB_SHA\`." \
+            "" \
+            "Workflow: $RUN_URL" \
+            "" \
+            "Includes Apple Silicon macOS 14+ Metal and x86-64 glibc 2.35+ CPU archives. No model weights are included. The macOS binary is not Developer ID signed or Apple notarized." \
+            > "$notes"
+          gh release create "$TAG" \
+            "dist/openjev-v${version}-aarch64-apple-darwin.tar.gz" \
+            "dist/openjev-v${version}-x86_64-unknown-linux-gnu.tar.gz" \
+            dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --target "$GITHUB_SHA" \
+            --title "openjev $TAG" \
+            --notes-file "$notes"

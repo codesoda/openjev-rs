@@ -84,6 +84,29 @@ See `docs/PLAN.md` for the reviewed milestone contract,
 normative emitted-readout schema, and `schemas/commands-v1.schema.json` for M4
 command envelopes.
 
+## Tagged binary releases
+
+The repository now contains a tag-triggered GitHub Actions pipeline for Apple
+Silicon macOS 14+ (Metal) and x86-64 Ubuntu/glibc 2.35+ (CPU). A tag must be
+exactly `v` plus the Cargo workspace version. Both native jobs must pass before
+a GitHub Release is created; branch, pull-request, and manual runs upload only
+ordinary workflow artifacts.
+
+Each release archive contains the executable, license/third-party notices,
+runtime documentation, and `BUILD-INFO.json`; model weights and cache data are
+never packaged. The release also has `SHA256SUMS`. CI executes the extracted
+binary from a temporary directory outside the checkout and checks that native
+dynamic dependencies resolve only to operating-system libraries. The macOS
+binary embeds its Metal library, but is not Developer ID signed or Apple
+notarized. Running either packaged binary requires no Python, CMake, compiler,
+Xcode, or Homebrew.
+
+See [`docs/RELEASE.md`](docs/RELEASE.md) for targets, system requirements,
+checksum verification, package contents, and user-local installation. Release
+publication and a real downloaded-artifact Metal HTTP/official-SDK smoke remain
+separate gates: packaging CI alone is not evidence that the downloaded release
+passed the latter.
+
 ## Build and install the M5 CLI
 
 The ordinary workspace build deliberately excludes llama.cpp:

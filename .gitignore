@@ -4,4 +4,7 @@ target-*/
 models/
 .DS_Store
 /out/
+/dist/
+__pycache__/
+*.py[cod]
 scripts/sdk-compat/node_modules/
