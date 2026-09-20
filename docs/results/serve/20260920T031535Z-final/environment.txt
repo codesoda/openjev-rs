@@ -1,0 +1,12 @@
+utc_started=2026-09-20T03:15:35Z
+repo=/Users/chrisraethke/projects/openjev-rs
+git_head=1dcfad3743c86dbeaccb12236ac2c1ea574a219b
+branch=main
+uname=Darwin Chriss-MacBook-Pro.local 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:45 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6030 arm64
+rustc=rustc 1.95.0 (59807616e 2026-04-14)
+cargo=cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+node=v24.15.0
+npm=11.12.1
+binary_before=/Users/chrisraethke/projects/openjev-rs/target-m2-metal/release/openjev size=22381216 mtime=2026-09-20T13:05:42Z
+preflight_native_model_process_count=0
+node_modules_preexisting=false

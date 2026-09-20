@@ -1,0 +1,5 @@
+server: OPENJEV_SMOKE_API_KEY=<redacted> target-m2-metal/release/openjev --serve --offline --model qwen3-0.6b --device metal --host 127.0.0.1 --port <free-port> --request-timeout-secs 120 --api-key-env OPENJEV_SMOKE_API_KEY
+install: npm ci --ignore-scripts --no-audit --no-fund
+sdk: OPENJEV_BASE_URL=http://127.0.0.1:<free-port> OPENJEV_API_KEY=<redacted> npm run smoke
+auth failure: GET /v1/models with Authorization: Bearer wrong-key (expect 401 JSON)
+shutdown: SIGTERM <server-pid>; wait <=45s; verify exit 0 and empty stdout

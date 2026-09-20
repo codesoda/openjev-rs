@@ -1,0 +1,4 @@
+    Checking openjev-core v0.1.0 (/Users/chrisraethke/projects/openjev-rs/crates/openjev-core)
+    Checking openjev-llama v0.1.0 (/Users/chrisraethke/projects/openjev-rs/crates/openjev-llama)
+    Checking openjev-cli v0.1.0 (/Users/chrisraethke/projects/openjev-rs/crates/openjev-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.45s

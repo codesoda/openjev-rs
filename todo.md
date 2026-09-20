@@ -16,7 +16,7 @@ resolved there; runtime gates remain unrun. Published llama crates are 0.1.156
 also corrects the brief's empty-option validation assumption, prediction-file
 cardinality (252; select authored144 by ID), build override assumptions, and
 chat-template API limitations. [`docs/PROGRESS.md`](docs/PROGRESS.md) records
-actual evidence. M1–M4 are approved and committed through HEAD `a44b805`; M3's strict authored144 plus perturbations108 prompt/token/slot gates pass, and production `score_direct` returns a full validated Readout. M5 is implemented locally without a commit: all twelve finalized CPU/Metal shared/batch probes fail the frozen gates, so no tested profile is enabled and production visibly falls back to serial full-prompt scoring. **The full original brief below is preserved**, not rewritten as if later runtime validation had occurred.
+actual evidence. M1–M5 are approved and committed; M3's strict authored144 plus perturbations108 prompt/token/slot gates pass. Partial M6 evaluation/benchmark and compact-output work is checkpointed at `1dcfad3` and remains incomplete. The separately requested resident `openjev --serve` Jev-compatible HTTP extension has passed parent/Astra review, real Metal HTTP/official SDK smoke tests, and workspace/CPU/Metal checks; evidence is in `docs/results/serve/`. It does not complete M6 or M7 and does not enable any failed shared/batch profile. **The full original brief below is preserved**, not rewritten as if later runtime validation had occurred.
 
 ---
 
@@ -67,7 +67,7 @@ actual evidence. M1–M4 are approved and committed through HEAD `a44b805`; M3's
 
 ## 1. Goals
 
-1. `openjev` CLI: decisions in, JSON out, scriptable/pipeable, local, no server.
+1. `openjev` CLI: decisions in, JSON out, scriptable/pipeable, local. The later user-requested, separately reviewed `--serve` extension supersedes the original “no server” boundary without changing default CLI output.
 2. Library crate usable from other Rust code (later: a `System1` trait shared
    with `gliner2-rs`, see `reference/gliner2-rs-notes/jev-and-gliner.md` §5).
 3. Bit-for-bit **prompt parity** with the Python `direct-options-v1` prompt
@@ -267,6 +267,12 @@ Output shape for `decide` (superset of Python):
 6. Licensing: MIT for our code; keep `reference/semif-py/LICENSE` and cite in
    `THIRD_PARTY.md` (prompt strings + fixtures are copied from SemIf, MIT).
    Add TypeSafe non-affiliation note like upstream.
+7. Later HTTP extension: Jev **wire** compatibility is a bounded subset, not
+   hosted prediction/calibration/context parity. Floating-point structured inputs
+   remain unsupported; options are limited to 16, questions to 64, bodies to
+   1 MiB, and repeated-state expansion to 4 MiB. Residency avoids reloading
+   weights but does not itself eliminate serial inference. Existing shared/batch
+   profiles remain disabled until their unchanged numerical gates pass.
 
 ### M1 implementation status (reviewed and approved)
 
@@ -365,8 +371,7 @@ No M5 shared/batch speedup is claimed. The large true-CPU shared deltas were ins
 - `System1` trait crate shared with `gliner2-rs` (`choice/noul/score` →
   distribution), so callers can swap a 194M encoder for a 4B decoder per
   question.
-- `serve` (HTTP, JSON, warm state cache), `--watch` REPL keeping one state
-  prefilled.
+- `--serve` HTTP/JSON residency is now implemented as a bounded Jev-compatible subset; a cross-request warm state-prefix cache is still future work. `--watch` REPL keeping one state prefilled remains future work.
 - Reranker mode (`Qwen3-Reranker-4B` yes/no log-odds per option).
 - Larger option cardinality (two-char slots), shortlist-then-choose for >16.
 - Conformal / temperature calibration tooling with reliability diagrams.

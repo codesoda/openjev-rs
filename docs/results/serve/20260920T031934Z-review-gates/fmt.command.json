@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "cargo",
+    "fmt",
+    "--all",
+    "--",
+    "--check"
+  ],
+  "env": {},
+  "OPENJEV_INTEGRATION": "unset"
+}

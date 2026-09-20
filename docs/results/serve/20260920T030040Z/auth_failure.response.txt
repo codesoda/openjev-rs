@@ -1,0 +1,3 @@
+HTTP status=401
+content-type=application/json
+body={"error_type":"authentication_error","message":"a valid bearer token is required"}

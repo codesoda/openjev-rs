@@ -1,0 +1,18 @@
+{
+  "auth_failure_error_type": "authentication_error",
+  "auth_failure_status": 401,
+  "failure": null,
+  "node_modules_removed": true,
+  "npm_ci_elapsed_seconds": 1.936,
+  "npm_ci_exit_code": 0,
+  "npm_ci_timed_out": false,
+  "port": 64012,
+  "ready_status": 200,
+  "sdk_smoke_elapsed_seconds": 1.636,
+  "sdk_smoke_exit_code": 0,
+  "sdk_smoke_timed_out": false,
+  "server_exit_code": 0,
+  "server_pid": 72973,
+  "server_stdout_bytes": 0,
+  "sigterm_sent": true
+}

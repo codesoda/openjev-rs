@@ -1,0 +1,1 @@
+OPENJEV_INTEGRATION=1 CARGO_TARGET_DIR=target-m2-metal GGML_METAL=ON cargo test --release -p openjev-cli --features metal,integration --test native_server -- --nocapture

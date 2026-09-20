@@ -1,0 +1,18 @@
+ M .gitignore
+ M Cargo.lock
+ M Cargo.toml
+ M README.md
+ M THIRD_PARTY.md
+ M crates/openjev-cli/Cargo.toml
+ M crates/openjev-cli/src/args.rs
+ M crates/openjev-cli/src/lib.rs
+ M docs/PROGRESS.md
+ M todo.md
+?? crates/openjev-cli/src/server/
+?? crates/openjev-cli/tests/jev_http_schema.rs
+?? crates/openjev-cli/tests/native_server.rs
+?? docs/SERVE.md
+?? docs/plans/
+?? docs/results/serve/
+?? schemas/jev-http-v1.schema.json
+?? scripts/sdk-compat/

@@ -4,6 +4,7 @@ pub mod input;
 mod m6;
 mod m6_bench;
 pub mod output;
+pub mod server;
 
 use std::{
     ffi::OsString,
@@ -45,6 +46,16 @@ impl std::fmt::Display for CliError {
 impl std::error::Error for CliError {}
 
 impl CliError {
+    pub fn usage(message: impl Into<String>) -> Self {
+        Self {
+            code: "usage".to_owned(),
+            message: message.into(),
+            class: ErrorClass::Validation,
+            id: None,
+            unparsed: false,
+        }
+    }
+
     pub fn validation(message: impl Into<String>) -> Self {
         Self {
             code: "validation".to_owned(),
@@ -212,9 +223,38 @@ fn execute<R: Read, W: Write, E: Write>(
 ) -> Result<i32, CliError> {
     let pretty = cli.global.pretty;
     let compact = cli.global.compact;
+    let has_server_option = cli.host.is_some()
+        || cli.port.is_some()
+        || cli.request_timeout_secs.is_some()
+        || cli.api_key_env.is_some();
+    if cli.serve {
+        if cli.command.is_some() {
+            return Err(CliError::validation(
+                "--serve cannot be combined with a CLI command",
+            ));
+        }
+        server::validate_server_global_args(&cli.global)?;
+        let options = server::ServeOptions::from_cli(
+            cli.host,
+            cli.port,
+            cli.request_timeout_secs,
+            cli.api_key_env.as_deref(),
+        )?;
+        let require_shared = cli.global.require_shared;
+        let config = commands::scoring_config(&cli.global)?;
+        return server::run(config, options, require_shared).map(|()| 0);
+    }
+    if has_server_option {
+        return Err(CliError::validation(
+            "--host, --port, --request-timeout-secs, and --api-key-env require --serve",
+        ));
+    }
+    let command = cli
+        .command
+        .ok_or_else(|| CliError::usage("a command or --serve is required"))?;
     if compact
         && !matches!(
-            &cli.command,
+            &command,
             Command::Decide(_)
                 | Command::Noul(_)
                 | Command::Score(_)
@@ -226,7 +266,7 @@ fn execute<R: Read, W: Write, E: Write>(
             "--compact applies only to decision commands: decide, noul, score, ask, and run",
         ));
     }
-    match cli.command {
+    match command {
         Command::Decide(args) => {
             let state = input::read_state(&args.state, stdin, stdin_is_terminal)?;
             let items = commands::decide_items(args, state)?;
@@ -538,7 +578,7 @@ fn execute_run_groups_and_shutdown<W: Write + ?Sized, E: Write + ?Sized>(
     }
 }
 
-fn attempt_native_group(
+pub(crate) fn attempt_native_group(
     scorer: &mut dyn DecisionScorer,
     items: &[Adapter],
     mode: ExecutionMode,
@@ -1253,6 +1293,26 @@ mod tests {
             ]);
             assert_eq!(code, 2);
             assert_eq!(stderr["error"]["code"], "unsupported");
+        }
+    }
+
+    #[test]
+    fn serve_alternative_and_server_only_flags_fail_before_model_loading() {
+        let (code, stdout, stderr) = invoke(&["openjev"]);
+        assert_eq!(code, 2);
+        assert!(stdout.is_null());
+        assert_eq!(stderr["error"]["code"], "usage");
+
+        for arguments in [
+            vec!["openjev", "--host", "127.0.0.1", "models"],
+            vec!["openjev", "--serve", "models"],
+            vec!["openjev", "--serve", "--compact"],
+            vec!["openjev", "--serve", "--host", "0.0.0.0"],
+        ] {
+            let (code, stdout, stderr) = invoke(&arguments);
+            assert_eq!(code, 2, "arguments: {arguments:?}");
+            assert!(stdout.is_null());
+            assert_eq!(stderr["error"]["code"], "validation");
         }
     }
 

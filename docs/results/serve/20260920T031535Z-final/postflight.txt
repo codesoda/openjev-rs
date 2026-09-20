@@ -1,0 +1,6 @@
+utc_finished=2026-09-20T03:17:34Z
+git_head=1dcfad3743c86dbeaccb12236ac2c1ea574a219b
+node_modules_absent=true
+captured_server_pid_98455_running=false
+server_stdout_bytes=0
+binary_sha256=476a5b9414a702e0e2c7cfa792dce24bdd724ed1a825cdb470071f2b3582dcbb

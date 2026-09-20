@@ -41,6 +41,16 @@ Other dependencies and external sources retain their own terms:
 - [utilityai/llama-cpp-rs](https://github.com/utilityai/llama-cpp-rs),
   MIT OR Apache-2.0; registry crates are pinned to 0.1.156.
 - [hf-hub](https://github.com/huggingface/hf-hub), Apache-2.0, pinned to 1.0.0.
+- [axum](https://github.com/tokio-rs/axum), MIT, pinned to 0.8.9, and
+  [Tokio](https://github.com/tokio-rs/tokio), MIT, pinned to 1.53.1, provide
+  the resident HTTP frontend/runtime.
+- The Jev wire adapter and reproducible compatibility smoke were checked against
+  [typesafe-ai/typesafe-sdk-js](https://github.com/typesafe-ai/typesafe-sdk-js)
+  commit `66880ccded6cb642dc1809620c2b108c33730214`, npm package 0.6.0 (MIT).
+  Two-decimal wire projection was additionally checked against Vercel AI commit
+  `20dd00abba618d5a516e0fee40ccd3e18a2bd1fb`, files
+  `packages/typesafe-ai/src/typesafe-ai-evaluation-model.ts` and
+  `typesafe-ai-evaluation-api.ts` (Apache-2.0).
 - Qwen and MiniCPM tokenizer/model sources listed in `docs/PLAN.md` remain
   external and subject to their model cards and licenses. Two small Qwen3 chat
   template fixtures extracted from the exact registered GGUF and pinned native

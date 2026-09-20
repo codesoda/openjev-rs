@@ -1,0 +1,6 @@
+   Compiling openjev-cli v0.1.0 (/Users/chrisraethke/projects/openjev-rs/crates/openjev-cli)
+    Finished `release` profile [optimized] target(s) in 30.16s
+     Running tests/native_server.rs (target-m2-metal/release/deps/native_server-9ec101e8466d710f)
+2026-09-20T03:16:22.091533Z  WARN llama-cpp-2: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden module="llama.cpp::load"
+2026-09-20T03:16:22.336931Z  WARN openjev_cli::server: resident request discarded tentative shared rows and is using fresh serial full-prompt fallback
+2026-09-20T03:16:22.684248Z  WARN openjev_cli::server: resident request discarded tentative shared rows and is using fresh serial full-prompt fallback

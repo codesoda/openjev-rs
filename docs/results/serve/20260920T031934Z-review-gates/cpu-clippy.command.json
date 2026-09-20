@@ -1,0 +1,20 @@
+{
+  "argv": [
+    "cargo",
+    "clippy",
+    "--workspace",
+    "--all-targets",
+    "--locked",
+    "--offline",
+    "--features",
+    "openjev-cli/native,openjev-cli/integration",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "env": {
+    "CARGO_TARGET_DIR": "target-m2-cpu",
+    "GGML_METAL": "OFF"
+  },
+  "OPENJEV_INTEGRATION": "unset"
+}

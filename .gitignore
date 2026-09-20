@@ -4,3 +4,4 @@ target-*/
 models/
 .DS_Store
 /out/
+scripts/sdk-compat/node_modules/

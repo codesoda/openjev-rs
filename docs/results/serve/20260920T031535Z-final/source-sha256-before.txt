@@ -1,0 +1,4 @@
+cdb21679e5c9595066cdccbb496348c00bae7721e8606d638f519f028459461f  crates/openjev-cli/src/server/mod.rs
+846bd2decb4bd1639d17681689fa1a2dd8a3d6bf12cbaf2d64fbc40429ca3285  crates/openjev-cli/src/server/jev.rs
+96cfd0111586bf912d092d472c3cecdc28b27faa47d01c8b8c733bd1cbe80efe  crates/openjev-cli/tests/native_server.rs
+bef177cf903c7280e45528239e36485f16b5d2eb08870019b505fc7be4ef9687  scripts/sdk-compat/smoke.mjs

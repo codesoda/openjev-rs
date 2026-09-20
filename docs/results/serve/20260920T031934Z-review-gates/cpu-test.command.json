@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "cargo",
+    "test",
+    "--workspace",
+    "--all-targets",
+    "--locked",
+    "--offline",
+    "--features",
+    "openjev-cli/native,openjev-cli/integration"
+  ],
+  "env": {
+    "CARGO_TARGET_DIR": "target-m2-cpu",
+    "GGML_METAL": "OFF"
+  },
+  "OPENJEV_INTEGRATION": "unset"
+}

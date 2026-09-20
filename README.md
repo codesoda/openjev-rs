@@ -34,6 +34,13 @@ uncalibrated normalized margin. A backend-disabled build parses and validates
 inputs but returns structured `backend_unavailable` rather than fake
 probabilities.
 
+The user-requested resident HTTP extension adds `openjev --serve`: one verified
+model is loaded and warmed once, then a bounded Jev-shaped API is served at
+`/v1/systemone`. The async HTTP frontend never makes the non-Send scorer shared;
+one dedicated synchronous owner thread retains it. See
+[`docs/SERVE.md`](docs/SERVE.md) for auth, deadlines, cancellation limits, wire
+mapping, conditional-probability disclosure, and the pinned official SDK smoke.
+
 Native shared/batch execution is never enabled merely because it compiled. A
 passing local receipt for the exact artifact, native pin, probe-suite version,
 device/offload, threads, context/batch/sequence settings and prompt profile is
@@ -127,7 +134,18 @@ openjev --offline --model qwen3-0.6b run \
   --input decisions.jsonl --output new-results.jsonl
 openjev models list
 openjev --offline models path qwen3-0.6b
+
+# Resident loopback API. The official SDK baseURL is this root URL; it appends /v1.
+openjev --serve --offline --model qwen3-0.6b --host 127.0.0.1 --port 8080
 ```
+
+The resident service exposes `POST /v1/systemone`, `GET /v1/models`,
+`GET /healthz`, and `GET /readyz`. Loopback may run without configured auth;
+non-loopback binding requires `--api-key-env NAME`. Bodies are capped at 1 MiB,
+admission at 16 jobs, and the whole-request deadline defaults to 120 seconds.
+The model is loaded exactly once and native decode remains noninterruptible.
+See [`docs/SERVE.md`](docs/SERVE.md) for the supported Jev subset and
+`scripts/sdk-compat/` for the exact `@typesafe-ai/sdk` 0.6.0 smoke source.
 
 Exactly one state source is accepted for `decide`/`noul`/`score`:
 `--state`, `--state-file`, `--state-json`, `--state-json-file`, or non-TTY

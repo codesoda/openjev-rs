@@ -1,0 +1,269 @@
+   Compiling openjev-core v0.1.0 (/Users/chrisraethke/projects/openjev-rs/crates/openjev-core)
+   Compiling openjev-cli v0.1.0 (/Users/chrisraethke/projects/openjev-rs/crates/openjev-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.73s
+     Running unittests src/lib.rs (target-m2-cpu/debug/deps/openjev_cli-5ecd7d136b11ccdd)
+
+running 27 tests
+test server::jev::tests::empty_external_ids_and_labels_are_mapped_without_entering_internal_ids ... ok
+test server::jev::tests::parses_all_types_and_preserves_external_order_and_values ... ok
+test server::jev::tests::singleton_choice_is_deterministic_and_null_empty_state_are_adapted_without_inference ... ok
+test commands::tests::deterministic_injection_covers_noul_score_confidence_and_shared_fallback ... ok
+test m6_bench::tests::injected_clock_samples_have_deterministic_nearest_rank_stats ... ok
+test input::tests::text_and_json_state_sources_preserve_bytes_and_require_explicit_json ... ok
+test server::jev::tests::projection_uses_unrounded_values_then_rounds_each_wire_number_without_renormalizing ... ok
+test server::jev::tests::rejects_duplicate_float_depth_unknown_and_invalid_counts ... ok
+test server::tests::loopback_and_nonloopback_auth_configuration_is_fail_closed ... ok
+test server::jev::tests::rejects_expanded_state_replication_before_per_question_clones ... ok
+test server::tests::worker_shutdown_error_and_panic_are_reported_once ... ok
+test server::tests::auth_validation_and_router_errors_are_json_and_do_not_infer ... ok
+test server::tests::terminal_engine_worker_error_clears_readiness_and_stops_later_inference ... ok
+test tests::parse_failure_precedes_backend_loading ... ok
+test server::tests::worker_failure_clears_readiness_and_does_not_hang_reply_receivers ... ok
+test tests::run_output_failure_stops_later_scoring_and_still_shuts_down ... ok
+test tests::run_stream_flushes_each_row_before_starting_the_next_score ... ok
+test tests::shared_run_streams_bounded_groups_and_falls_back_whole_group ... ok
+test server::tests::router_loads_once_serves_sdk_shapes_and_shuts_down_once ... ok
+test tests::tty_without_state_is_validation_error_before_backend ... ok
+test tests::unsupported_m5_and_m7_options_fail_before_backend ... ok
+test tests::serve_alternative_and_server_only_flags_fail_before_model_loading ... ok
+test server::tests::require_shared_rejects_zero_or_one_inferential_question_and_preserves_other_modes ... ok
+test tests::help_and_version_are_json_only_and_include_piped_examples ... ok
+test server::tests::queued_timeout_is_dropped_before_inference ... ok
+test server::tests::deadline_cancels_queued_work_and_inflight_work_keeps_admission_charged ... ok
+test server::tests::disconnected_queued_request_is_dropped_before_inference ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running unittests src/main.rs (target-m2-cpu/debug/deps/openjev-d175d111eb4de3de)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli_process.rs (target-m2-cpu/debug/deps/cli_process-6b2c0d96936ef4ad)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/command_schema.rs (target-m2-cpu/debug/deps/command_schema-2b1a4d3cf6436c43)
+
+running 1 test
+test command_schema_export_is_valid_json_with_all_m6_tags ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/compact_projection.rs (target-m2-cpu/debug/deps/compact_projection-4ea260a4c53cc14c)
+
+running 3 tests
+test compact_projection_covers_noul_score_confidence_and_fallback ... ok
+test compact_projection_is_typed_and_excludes_verbose_fields ... ok
+test error_records_are_not_compact_projected_and_schema_validates ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/jev_http_schema.rs (target-m2-cpu/debug/deps/jev_http_schema-d640cb1631a7e17e)
+
+running 1 test
+test jev_http_schema_compiles_and_accepts_supported_request_response_and_error ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/native_cli.rs (target-m2-cpu/debug/deps/native_cli-d5ed84ab4aa707f4)
+
+running 6 tests
+test cached_qwen_exercises_m4_native_cli_surfaces_and_json_streams ... ok
+test probe_child_crash_durably_revokes_a_preexisting_synthetic_pass ... ok
+test custom_local_artifact_requires_and_records_explicit_profile_override ... ok
+test cached_qwen_compact_quiet_emits_small_typed_row_without_info_logs ... ok
+test run_continues_after_runtime_row_failure_and_output_is_create_only ... ok
+test run_output_file_is_incremental_before_process_completion ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/native_server.rs (target-m2-cpu/debug/deps/native_server-0b67b4b3fbacd770)
+
+running 1 test
+test cached_qwen_resident_server_reuses_one_process_and_stops_on_sigterm ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target-m2-cpu/debug/deps/openjev_core-7df1c19ef3048aae)
+
+running 40 tests
+test eval::tests::missing_and_invalid_rows_remain_in_denominators ... ok
+test eval::tests::aligns_semantic_ids_and_breaks_ties_in_gold_order ... ok
+test numerics::tests::vocabulary_ties_and_masked_entries_are_deterministic ... ok
+test eval::tests::perturbation_stability_requires_and_aligns_authored_baselines ... ok
+test numerics::tests::choice_uses_first_probability_tie_after_rounding ... ok
+test numerics::tests::mass_is_invariant_to_extreme_common_f32_offsets ... ok
+test numerics::tests::rejects_nonfinite_and_contradictory_values ... ok
+test numerics::tests::stable_f64_softmax_and_first_ties ... ok
+test eval::tests::rejects_unknown_and_duplicate_ids ... ok
+test primitives::tests::noul_uses_yes_first ... ok
+test primitives::tests::readout_rejects_nonfinite_json_instead_of_emitting_null ... ok
+test primitives::tests::score_preserves_distribution_and_first_tie ... ok
+test prompt::tests::renders_profiles_and_fixed_key_order ... ok
+test types::tests::decision_allows_empty_options_but_not_duplicate_ids ... ok
+test prompt::tests::reserved_json_keys_retain_python_prompt_bytes ... ok
+test prompt::tests::retained_input_metadata_never_enters_prompt ... ok
+test prompt::tests::shared_prefix_text_uses_ordered_evidence_and_placeholder_once ... ok
+test prompt::tests::writes_control_characters_like_python ... ok
+test slots::tests::rejects_multitoken_and_vocabulary_boundary ... ok
+test slots::tests::rejects_roundtrip_collision_and_boundary_changes ... ok
+test slots::tests::verifies_exact_slots ... ok
+test types::tests::owned_value_conversion_remains_validated_but_cannot_recover_lexemes ... ok
+test types::tests::decision_numeric_lexemes_match_all_raw_json_routes ... ok
+test types::tests::typed_extraction_reports_field_paths ... ok
+test types::tests::raw_decision_routes_preserve_string_states ... ok
+test types::tests::raw_decision_routes_move_state_and_metadata_without_reinterpreting_values ... ok
+test types::tests::raw_json_routes_reject_duplicates_for_all_public_input_types ... ok
+test types::tests::raw_question_routes_ignore_extra_fields_without_reinterpreting_them ... ok
+test types::tests::raw_state_routes_preserve_reserved_keys_and_json_looking_strings ... ok
+test types::tests::state_numeric_lexemes_match_all_raw_json_routes ... ok
+test types::tests::raw_json_routes_share_explicit_depth_boundaries ... ok
+test types::tests::state_top_level_shape_and_whitespace_match_upstream ... ok
+test validate::tests::deeply_nested_built_value_is_rejected_and_dropped_iteratively ... ok
+test validate::tests::rejects_float_and_overflow_at_paths ... ok
+test validate::tests::rejects_lone_surrogate ... ok
+test validate::tests::preserves_order_and_normalizes_negative_zero ... ok
+test validate::tests::rejects_duplicates_at_nested_path ... ok
+test validate::tests::deeply_nested_raw_json_returns_error_without_recursing_unboundedly ... ok
+test types::tests::raw_json_routes_bound_five_thousand_nested_containers ... ok
+test fixtures::tests::embedded_assets_have_frozen_hashes_and_counts ... ok
+
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/eval_reference.rs (target-m2-cpu/debug/deps/eval_reference-f06da2fd8be9e6e7)
+
+running 2 tests
+test hand_metrics_match_upstream_probability_subset ... ok
+test full_frozen_qwen_fixtures_match_python_probability_subset ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+
+     Running tests/prompt_goldens.rs (target-m2-cpu/debug/deps/prompt_goldens-fef3b90ea461cedb)
+
+running 2 tests
+test perturbation_108_prompt_hashes_match_by_id ... ok
+test authored_144_prompt_hashes_match_by_id ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/prompt_oracle_fixture.rs (target-m2-cpu/debug/deps/prompt_oracle_fixture-ef4ba1f4658399ac)
+
+running 1 test
+test restricted_profile_oracle_matches ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/python_differential.rs (target-m2-cpu/debug/deps/python_differential-22291816948e936e)
+
+running 4 tests
+test library_values_with_floats_are_rejected_recursively ... ok
+test reserved_keys_in_decision_state_match_python_prompt_payload ... ok
+test parsed_insertion_order_matches_python ... ok
+test matches_python_stdlib_across_nested_order_limits_and_unicode ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/readout_validation.rs (target-m2-cpu/debug/deps/readout_validation-32518e062b6be373)
+
+running 4 tests
+test validates_nested_timing_and_postprocess_provenance ... ok
+test accelerator_actual_layers_can_be_explicitly_unknown_but_never_inferred ... ok
+test rejects_contract_and_primitive_mutations ... ok
+test real_valid_readouts_serialize_and_pass_exported_schema ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/schema_export.rs (target-m2-cpu/debug/deps/schema_export-60506d3d16b58ab2)
+
+running 1 test
+test exported_schema_is_the_plan_appendix ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target-m2-cpu/debug/deps/openjev_llama-2d64dae3747fb48c)
+
+running 46 tests
+test cache::tests::cache_root_precedence_is_explicit ... ok
+test cache::tests::cross_process_cache_worker ... ok
+test cache::tests::corrupt_hit_is_an_integrity_error_without_silent_fetch ... ok
+
+running 1 test
+
+running 1 test
+test cache::tests::custom_hub_online_rejects_hub_escape_before_downloader ... ok
+test cache::tests::custom_hub_rejects_nested_snapshot_parent_escape_before_downloader ... ok
+test cache::tests::healthy_cache_never_fetches_even_with_repair_enabled ... ok
+test cache::tests::custom_hub_offline_rejects_external_snapshot_target_without_fetch ... ok
+test cache::tests::failed_repair_leaves_no_verified_receipt ... ok
+test cache::tests::custom_hub_mock_accepts_normal_relative_snapshot_symlink ... ok
+test cache::tests::malformed_paths_fail_before_filesystem_access ... ok
+test cache::tests::custom_hub_mock_download_and_offline_reuse_stay_owned ... ok
+test cache::tests::offline_miss_rejects_receipts_parent_symlink_without_deleting_outside_receipt ... ok
+test cache::tests::offline_repair_bypasses_corrupt_external_and_returns_miss ... ok
+test cache::tests::concurrent_threads_reuse_one_mock_download ... ok
+test cache::tests::offline_hit_verifies_and_offline_miss_never_fetches ... ok
+test engine::tests::branch_reuse_requires_successful_full_sequence_clear ... ok
+test cache::tests::rejects_owned_hub_symlink_escape_before_fetch ... ok
+test cache::tests::repair_rejects_hub_parent_symlink_without_moving_outside_snapshot ... ok
+test engine::tests::final_logits_index_must_be_local_to_last_chunk ... ok
+test engine::tests::qwen_template_equivalence_is_narrowly_keyed ... ok
+test engine::tests::owner_thread_join_reports_panics_and_clean_shutdown ... ok
+test engine::tests::strict_encoding_gate_rejects_spacing_and_bos_mutations ... ok
+test cache::tests::repair_rejects_nested_blob_parent_symlink_without_moving_outside_blob ... ok
+test engine::tests::state_prefix_tokenization_drops_exactly_one_token ... ok
+test cache::tests::custom_hub_rejects_existing_lock_repo_blob_and_negative_parent_escapes ... ok
+test cache::tests::repair_replaces_owned_corrupt_blob_from_valid_external_source ... ok
+test cache::tests::imports_normal_hf_relative_snapshot_symlink_offline ... ok
+test engine::tests::ragged_scheduler_covers_empty_uneven_and_invalid_bounds ... ok
+test model::tests::local_custom_artifact_is_hashed_in_place_without_a_golden_claim ... ok
+test cache::tests::repair_of_owned_leaf_snapshot_symlink_retains_normal_behavior ... ok
+test probe::tests::frozen_tolerances_cannot_be_relaxed_by_receipt_data ... ok
+test probe::tests::incomplete_or_reordered_suite_cannot_activate_a_receipt ... ok
+test cache::tests::repair_bypasses_corrupt_external_source_and_fetches ... ok
+test engine::tests::wave_planner_budgets_prefix_plus_sum_of_active_suffixes ... ok
+test cache::tests::repair_replaces_dangling_owned_blob_symlink ... ok
+test probe::tests::receipt_identity_covers_every_configuration_field ... ok
+test readout_cache_semantics_tests::cached_artifact_does_not_make_repeated_direct_readouts_cache_hits ... ok
+test registry::tests::bundled_registry_has_exact_pins ... ok
+test registry::tests::qwen_template_fixtures_have_reviewed_identities ... ok
+test registry::tests::rejects_unsafe_repo_and_file_paths ... ok
+test probe::tests::receipt_leaf_symlink_is_never_trusted ... ok
+test probe::tests::malformed_or_forged_receipts_are_rejected_but_consistent_local_receipts_load ... ok
+test probe::tests::failed_child_record_remains_ineligible_and_parent_identity_is_authoritative ... ok
+test probe::tests::publication_failure_never_reactivates_preexisting_pass ... ok
+test probe::tests::reprobe_suspends_preexisting_pass_until_an_exact_new_pass_is_published ... ok
+test cache::tests::cross_process_cache_worker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.24s
+
+test cache::tests::cross_process_cache_worker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.26s
+
+test cache::tests::concurrent_processes_fetch_once_and_reuse_verified_path ... ok
+
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+     Running tests/m3_exact_gate.rs (target-m2-cpu/debug/deps/m3_exact_gate-7a399457fa0ecdf6)
+
+running 1 test
+test qwen_authored144_exact_encoded_prompt_gate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests examples/m2_smoke.rs (target-m2-cpu/debug/examples/m2_smoke-d5f6547e36041533)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests examples/m3_parity.rs (target-m2-cpu/debug/examples/m3_parity-0476957bacb34418)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

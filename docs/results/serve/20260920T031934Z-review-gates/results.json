@@ -1,0 +1,30 @@
+[
+  {
+    "check": "fmt",
+    "exit_code": 0
+  },
+  {
+    "check": "workspace-clippy",
+    "exit_code": 0
+  },
+  {
+    "check": "workspace-test",
+    "exit_code": 0
+  },
+  {
+    "check": "metal-clippy",
+    "exit_code": 0
+  },
+  {
+    "check": "metal-test",
+    "exit_code": 0
+  },
+  {
+    "check": "cpu-clippy",
+    "exit_code": 0
+  },
+  {
+    "check": "cpu-test",
+    "exit_code": 0
+  }
+]

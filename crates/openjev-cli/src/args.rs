@@ -8,10 +8,12 @@ const ROOT_AFTER_HELP: &str = r#"Examples:
   printf '%s\n' '{"id":"d1","state":"ticket","question":"Which queue?","options":[{"id":"access","description":"Account access"},{"id":"billing","description":"Billing"}]}' | openjev --model qwen3-0.6b ask
   printf '%s\n' '{"id":"d1","state":"ticket","question":"Which queue?","options":[{"id":"access","description":"Account access"},{"id":"billing","description":"Billing"}]}' | openjev --model qwen3-0.6b run
   openjev models list
+  openjev --serve --offline --model qwen3-0.6b --host 127.0.0.1 --port 8080
 
 State text is never trimmed or guessed as JSON. Use --state-json or
 --state-json-file for structured state. stdout is JSON/JSONL only.
---compact applies only to decide, noul, score, ask, and run."#;
+--compact applies only to decide, noul, score, ask, and run.
+--serve is an alternative to a command and keeps one verified model resident."#;
 
 #[derive(Clone, Debug, Parser)]
 #[command(
@@ -23,8 +25,23 @@ State text is never trimmed or guessed as JSON. Use --state-json or
 pub struct Cli {
     #[command(flatten)]
     pub global: GlobalArgs,
+    /// Run the resident Jev-compatible HTTP service instead of a CLI command.
+    #[arg(long)]
+    pub serve: bool,
+    /// HTTP bind address (valid only with --serve).
+    #[arg(long)]
+    pub host: Option<std::net::IpAddr>,
+    /// HTTP bind port (valid only with --serve).
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// Whole-request deadline in seconds (valid only with --serve).
+    #[arg(long)]
+    pub request_timeout_secs: Option<u64>,
+    /// Environment variable containing the bearer secret (valid only with --serve).
+    #[arg(long)]
+    pub api_key_env: Option<String>,
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Clone, Debug, Default, Args)]

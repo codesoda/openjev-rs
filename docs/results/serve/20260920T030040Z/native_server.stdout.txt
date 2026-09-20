@@ -1,0 +1,6 @@
+
+running 1 test
+test cached_qwen_resident_server_reuses_one_process_and_stops_on_sigterm ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.10s
+
