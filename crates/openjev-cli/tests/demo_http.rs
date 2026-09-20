@@ -118,7 +118,8 @@ fn eight_real_posts_use_auth_and_model_and_preserve_response_and_disclosures() {
     let requests = server.requests.lock().unwrap();
     assert_eq!(requests.len(), 8);
     let mut types = std::collections::BTreeSet::new();
-    for (headers, request) in requests.iter() {
+    for (row, (headers, request)) in rows.iter().zip(requests.iter()) {
+        assert_eq!(&row["request"], request);
         assert_eq!(headers["authorization"], "Bearer demo-only-test-secret");
         assert_eq!(headers["content-type"], "application/json");
         assert_eq!(request["model"], "custom-resident");

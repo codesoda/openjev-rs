@@ -551,3 +551,28 @@ and final mixed frames for readability/clipping. ShellCheck, Python compilation,
 VHS validation, FFprobe, and whitespace checks pass. Raw recording logs and rows
 are under ignored `out/demo-recording/`. No Rust/backend changes or new model
 downloads were needed for this media work.
+
+### Slower input/result walkthrough and recorded startup
+
+Replaced the initial fast clip with a 138.44-second recording (~1.2 MiB GIF,
+~1.3 MiB MP4). It now begins with actual server launch, cache verification,
+warmup and `/readyz`; startup is no longer off-camera. Each single-question
+example shows its state/question/options for 8 seconds, then its result for
+6 seconds. The mixed example gets 14 and 10 seconds. These are reading pauses,
+not simulated inference delays. Inputs and answers are taken from real HTTP
+traffic; `demo` rows now add the exact `request` object, with a transport test
+asserting equality to the body received by the mock server. Other CLI decision
+and Jev HTTP schemas are unchanged.
+
+`demo/session.py` owns the real server/client lifecycle and types the commands
+it executes. Verified all eight request/response pairs, clean shutdown, empty
+server stdout/client stderr, and reviewed startup, single/mixed inputs and
+results from the actual MP4. Workspace fmt/clippy/tests (142 tests), three
+presenter tests, ShellCheck, Python compilation, VHS validation, and FFprobe
+checks pass. Capture uses the fresh optimized Metal build via a temporary PATH
+override, not a replacement of the user's installed binary.
+
+README now contains only a GIF linked directly to the MP4; removed the extra
+caption and auxiliary links. Reproduction and honesty notes remain in
+`demo/README.md`. No predictions were changed or replaced, no weights downloaded,
+and no public release created.

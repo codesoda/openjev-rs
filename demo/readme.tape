@@ -1,4 +1,4 @@
-# Run via bash demo/record.sh from the repo root (starts a real resident server).
+# Run bash demo/record.sh from the repo root. No model is preloaded.
 Output docs/demo.gif
 Output docs/demo.mp4
 
@@ -14,16 +14,16 @@ Set Theme "Catppuccin Mocha"
 Set WindowBar Colorful
 Set BorderRadius 12
 Set Framerate 15
-Set TypingSpeed 25ms
 
 Hide
-Type `export PS1='$ '; clear; printf '\033[1;36mOPENJEV / local typed decisions\033[0m\n\nServer already loaded in another terminal:\n  openjev serve --offline --model qwen3-0.6b --port %s\n\nEight real HTTP requests. Compact view, paced for reading.\n\n' "$DEMO_PORT"`
+Type `export PS1='$ '; clear`
 Enter
 Show
-Sleep 2s
-Type `openjev demo --base-url "$DEMO_URL" --quiet | python3 demo/present.py`
+# Script types the exact commands it runs, and owns the real server/client.
+Hide
+Type "python3 demo/session.py"
 Enter
-Sleep 26s
+Show
+Sleep 135s
 Wait+Screen /8 HTTP requests complete/
-Sleep 3s
-Screenshot out/demo-recording/final.png
+Sleep 5s

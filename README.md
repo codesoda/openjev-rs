@@ -2,9 +2,7 @@
 
 # openjev-rs
 
-<img src="docs/demo.gif" alt="OpenJev demo: eight live HTTP examples returning Choice, Noul, and Score JSON from a resident local model" width="100%">
-
-<sub>[Watch the MP4](docs/demo.mp4) · [Re-record with VHS](demo/README.md) · Live Qwen3-0.6B / Metal; compact display paced for reading, not a benchmark. Current source build, not v0.1.0.</sub>
+<a href="docs/demo.mp4"><img src="docs/demo.gif" alt="Watch OpenJev start a local server, then run eight examples showing inputs and typed JSON results" width="100%"></a>
 
 **Local typed decisions for scripts, applications, and AI agents.**
 
@@ -274,8 +272,9 @@ It uses the server's resident model, **without loading or downloading another
 model**. These illustrate the API; they are not accuracy tests.
 
 Progress, states, and questions go to stderr. stdout contains results with
-`example`, `elapsed_ms` (HTTP round-trip time, including queueing), the unchanged
-Jev `response`, and `metadata` preserving execution/fallback/probability headers.
+`example`, the exact `request` (state, questions, and options), `elapsed_ms`
+(HTTP round-trip time, including queueing), the unchanged Jev `response`, and
+`metadata` preserving execution/fallback/probability headers.
 By default results stream as JSONL; `--pretty` emits one JSON array after all
 examples succeed. Use `--quiet` to suppress progress. A failed example stops the
 run with a nonzero exit code; JSONL results already written remain available.

@@ -200,7 +200,7 @@ pub(crate) fn execute<W: Write, E: Write>(
             if !global.quiet {
                 writeln!(stderr, "Completed in {elapsed_ms:.1} ms").map_err(io_error)?;
             }
-            let row = json!({"example": example.name, "elapsed_ms": elapsed_ms, "response": body, "metadata": metadata});
+            let row = json!({"example": example.name, "request": example.request, "elapsed_ms": elapsed_ms, "response": body, "metadata": metadata});
             if global.pretty {
                 results.push(row);
             } else {
