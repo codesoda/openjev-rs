@@ -224,7 +224,7 @@ curl_common() {
 
 resolve_latest_public() {
     effective=$(curl_common --head --output /dev/null --write-out '%{url_effective}' "$REPO_URL/releases/latest") ||
-        fail "could not resolve the latest public release; this repository is currently private, so authenticate gh for github.com"
+        fail "could not resolve the latest release from $REPO_URL/releases/latest"
     prefix="$REPO_URL/releases/tag/"
     case "$effective" in
         "$prefix"*) TAG=${effective#"$prefix"} ;;
@@ -235,20 +235,9 @@ resolve_latest_public() {
 }
 
 acquire_release() {
-    USING_GH=0
-    if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
-        USING_GH=1
-    fi
-
+    require_command curl
     if [ -z "$TAG" ]; then
-        if [ "$USING_GH" -eq 1 ]; then
-            TAG=$(gh release view --repo "$REPO_URL" --json tagName --jq .tagName 2>/dev/null) ||
-                fail "authenticated gh could not resolve the latest $REPO release"
-            is_valid_tag "$TAG" || fail "latest release returned an invalid tag: $TAG"
-        else
-            require_command curl
-            resolve_latest_public
-        fi
+        resolve_latest_public
     fi
 
     VERSION=${TAG#v}
@@ -256,20 +245,12 @@ acquire_release() {
     ASSET="$ROOT.tar.gz"
     ARCHIVE="$TEMP_DIR/$ASSET"
     CHECKSUMS="$TEMP_DIR/SHA256SUMS"
+    base="$REPO_URL/releases/download/$TAG"
 
-    if [ "$USING_GH" -eq 1 ]; then
-        gh release download "$TAG" --repo "$REPO_URL" --pattern "$ASSET" --dir "$TEMP_DIR" >/dev/null ||
-            fail "authenticated gh could not download $ASSET"
-        gh release download "$TAG" --repo "$REPO_URL" --pattern SHA256SUMS --dir "$TEMP_DIR" >/dev/null ||
-            fail "authenticated gh could not download SHA256SUMS"
-    else
-        require_command curl
-        base="$REPO_URL/releases/download/$TAG"
-        curl_common --output "$ARCHIVE" "$base/$ASSET" ||
-            fail "could not download $ASSET; this repository is currently private, so authenticate gh for github.com"
-        curl_common --output "$CHECKSUMS" "$base/SHA256SUMS" ||
-            fail "could not download SHA256SUMS; this repository is currently private, so authenticate gh for github.com"
-    fi
+    curl_common --output "$ARCHIVE" "$base/$ASSET" ||
+        fail "could not download $ASSET from $base"
+    curl_common --output "$CHECKSUMS" "$base/SHA256SUMS" ||
+        fail "could not download SHA256SUMS from $base"
     [ -f "$ARCHIVE" ] && [ ! -L "$ARCHIVE" ] || fail "release archive was not downloaded"
     [ -f "$CHECKSUMS" ] && [ ! -L "$CHECKSUMS" ] || fail "SHA256SUMS was not downloaded"
 }

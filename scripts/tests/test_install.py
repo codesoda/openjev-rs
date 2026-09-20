@@ -99,28 +99,7 @@ class InstallerTests(unittest.TestCase):
         )
         self._stub(
             "gh",
-            "printf 'gh %s\\n' \"$*\" >>\"$CALL_LOG\"\n"
-            "case \"${1:-}\" in\n"
-            "  auth) [ \"${GH_AUTH:-0}\" = 1 ] ;;\n"
-            "  release)\n"
-            "    case \"${2:-}\" in\n"
-            "      view) printf '%s\\n' \"$LATEST_TAG\" ;;\n"
-            "      download)\n"
-            "        tag=$3; pattern= dir=\n"
-            "        shift 3\n"
-            "        while [ $# -gt 0 ]; do\n"
-            "          case \"$1\" in\n"
-            "            --pattern) pattern=$2; shift 2 ;;\n"
-            "            --dir) dir=$2; shift 2 ;;\n"
-            "            *) shift ;;\n"
-            "          esac\n"
-            "        done\n"
-            "        cp \"$FIXTURES/$tag/$pattern\" \"$dir/$pattern\"\n"
-            "        ;;\n"
-            "      *) exit 2 ;;\n"
-            "    esac ;;\n"
-            "  *) exit 2 ;;\n"
-            "esac\n",
+            "printf 'gh unexpectedly called\n' >>\"$CALL_LOG\"\nexit 99\n",
         )
 
     def make_release(
@@ -232,7 +211,6 @@ class InstallerTests(unittest.TestCase):
                 "LATEST_TAG": environment.pop("LATEST_TAG", "v0.1.0"),
                 "CALL_LOG": str(self.log),
                 "EVENT_LOG": str(self.events),
-                "GH_AUTH": "0",
             }
         )
         env.update({key: str(value) for key, value in environment.items()})
@@ -297,22 +275,16 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(calls.count("curl "), 1)
         self.assertFalse(self.installed_root().exists())
 
-    def test_authenticated_gh_latest_path_does_not_use_curl(self):
+    def test_public_download_ignores_github_credentials_and_cli(self):
         self.make_release()
-        self.run_installer(GH_AUTH="1")
+        self.run_installer(GH_TOKEN="unused-test-token", GH_HOST="enterprise.example")
         calls = self.log.read_text()
-        self.assertIn("gh release view", calls)
-        self.assertIn("gh release download", calls)
-        self.assertNotIn("curl ", calls)
-        self.assert_links()
-
-    def test_github_host_is_explicit_for_authenticated_release_commands(self):
-        self.make_release()
-        self.run_installer(GH_AUTH="1", GH_HOST="enterprise.example")
-        release_calls = [line for line in self.log.read_text().splitlines() if line.startswith("gh release ")]
-        self.assertEqual(len(release_calls), 3)
-        for line in release_calls:
-            self.assertIn("--repo https://github.com/codesoda/openjev-rs", line)
+        self.assertNotIn("gh ", calls)
+        self.assertNotIn("unused-test-token", calls)
+        self.assertNotIn("enterprise.example", calls)
+        self.assertNotIn("Authorization", calls)
+        self.assertEqual(calls.count("curl "), 3)
+        self.assertIn("https://github.com/codesoda/openjev-rs/releases/latest", calls)
         self.assert_links()
 
     def test_signal_during_link_staging_cleans_temporary_directories(self):

@@ -15,20 +15,13 @@ Running `openjev` does not require Python, CMake, a compiler, Xcode, or Homebrew
 
 ## Automatic installation
 
-The root [`install.sh`](../install.sh) installs prebuilt release artifacts; it does not build from source or download models. For public GitHub access:
+The root [`install.sh`](../install.sh) installs prebuilt release artifacts; it does not build from source or download models. No GitHub account, token, or GitHub CLI is required:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/codesoda/openjev-rs/main/install.sh | sh
 ```
 
-The repository is currently private. Use an authenticated GitHub CLI account with access:
-
-```sh
-gh api --hostname github.com -H 'Accept: application/vnd.github.raw' \
-  repos/codesoda/openjev-rs/contents/install.sh | sh
-```
-
-Run `gh auth login` first if needed. Append `-s -- --version v0.1.0` to `sh` to select an exact release; the default is latest. The installer uses authenticated `gh` when available, otherwise public HTTPS downloads through `curl`. Installation requires neither Python nor `jq`.
+Append `-s -- --version v0.1.0` to `sh` to select an exact release; the default is latest. All release downloads use public HTTPS URLs through `curl`, with checksum verification before extraction. Installation requires neither Python nor `jq`.
 
 Payloads are retained at `~/.openjev/bin/openjev-v<VERSION>-<TARGET>/`, including all notices and covered-source archives. `~/.openjev/bin/openjev` selects the active executable, and `~/.local/bin/openjev` points to that stable path. Managed symlinks are updated on upgrade; unrelated files/links are refused. The earlier `~/.local/share/openjev/releases/` installation layout can be migrated without deleting its payload.
 

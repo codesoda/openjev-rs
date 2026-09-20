@@ -82,24 +82,19 @@ The macOS binary is not Developer ID signed or notarized.
 ### Install the CLI
 
 The installer downloads a prebuilt release, verifies its SHA-256 checksum, and
-installs it without `sudo`. With public GitHub access:
+installs it without `sudo`. No GitHub account, token, or GitHub CLI is needed:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/codesoda/openjev-rs/main/install.sh | sh
 ```
 
-**This repository is currently private.** Until it is public, use an authenticated
-[GitHub CLI](https://cli.github.com/) account with repository access instead:
+The installer downloads the latest public release directly with `curl`. To pin a
+version:
 
 ```sh
-gh auth login
-gh api --hostname github.com -H 'Accept: application/vnd.github.raw' \
-  repos/codesoda/openjev-rs/contents/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/codesoda/openjev-rs/main/install.sh | sh -s -- --version v0.1.0
 ```
 
-The installer uses authenticated `gh` for private release downloads when available;
-otherwise it uses `curl` for public releases. It installs the latest release by
-default. To pin a version, replace `| sh` with `| sh -s -- --version v0.1.0`.
 From a local checkout, `sh install.sh` performs the same prebuilt installation—it
 does not compile the project.
 
