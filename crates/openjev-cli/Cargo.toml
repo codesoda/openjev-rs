@@ -34,6 +34,7 @@ tracing-subscriber.workspace = true
 [dev-dependencies]
 futures-util = "=0.3.34"
 jsonschema.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true
 
 [lints]

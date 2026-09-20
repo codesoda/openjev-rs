@@ -958,7 +958,7 @@ fn check_job_state(
 mod tests {
     use std::{
         convert::Infallible,
-        sync::{Arc, Mutex},
+        sync::{Arc, Condvar, Mutex},
     };
 
     use axum::{
@@ -987,7 +987,26 @@ mod tests {
 
     struct TestScorer {
         state: Arc<Mutex<TestState>>,
-        sleep: Duration,
+    }
+
+    #[derive(Default)]
+    struct BlockingGateState {
+        entered: usize,
+        completed: usize,
+        released: bool,
+    }
+
+    #[derive(Default)]
+    struct BlockingGate {
+        state: Mutex<BlockingGateState>,
+        changed: Condvar,
+    }
+
+    struct GateReleaseOnDrop(Arc<BlockingGate>);
+
+    struct BlockingTestScorer {
+        inner: TestScorer,
+        gate: Arc<BlockingGate>,
     }
 
     struct PanicScorer(TestScorer);
@@ -1122,9 +1141,6 @@ mod tests {
     impl DecisionScorer for TestScorer {
         fn score_direct(&mut self, decision: Decision) -> Result<openjev_core::Readout, CliError> {
             let warmup = decision.id == "openjev-server-warmup";
-            if !warmup && !self.sleep.is_zero() {
-                std::thread::sleep(self.sleep);
-            }
             let mut state = self.state.lock().unwrap();
             state.calls += 1;
             state.direct_calls += 1;
@@ -1138,6 +1154,79 @@ mod tests {
         fn shutdown(&mut self) -> Result<(), CliError> {
             self.state.lock().unwrap().shutdowns += 1;
             Ok(())
+        }
+    }
+
+    impl BlockingGate {
+        const WAIT_LIMIT: Duration = Duration::from_secs(30);
+
+        fn enter_and_wait(&self) {
+            let mut state = self.state.lock().unwrap();
+            state.entered += 1;
+            self.changed.notify_all();
+            let deadline = Instant::now() + Self::WAIT_LIMIT;
+            while !state.released {
+                let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                    drop(state);
+                    panic!("timed out waiting for the test scorer gate to be released");
+                };
+                let (next, result) = self.changed.wait_timeout(state, remaining).unwrap();
+                state = next;
+                if result.timed_out() && !state.released {
+                    drop(state);
+                    panic!("timed out waiting for the test scorer gate to be released");
+                }
+            }
+        }
+
+        fn complete(&self) {
+            let mut state = self.state.lock().unwrap();
+            state.completed += 1;
+            self.changed.notify_all();
+        }
+
+        fn release(&self) {
+            let mut state = self.state.lock().unwrap();
+            state.released = true;
+            self.changed.notify_all();
+        }
+
+        fn wait_for(&self, entered: usize, completed: usize) -> bool {
+            let mut state = self.state.lock().unwrap();
+            let deadline = Instant::now() + Self::WAIT_LIMIT;
+            while state.entered < entered || state.completed < completed {
+                let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                    return false;
+                };
+                let (next, result) = self.changed.wait_timeout(state, remaining).unwrap();
+                state = next;
+                if result.timed_out() && (state.entered < entered || state.completed < completed) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+
+    impl Drop for GateReleaseOnDrop {
+        fn drop(&mut self) {
+            self.0.release();
+        }
+    }
+
+    impl DecisionScorer for BlockingTestScorer {
+        fn score_direct(&mut self, decision: Decision) -> Result<openjev_core::Readout, CliError> {
+            if decision.id == "openjev-server-warmup" {
+                return self.inner.score_direct(decision);
+            }
+            self.gate.enter_and_wait();
+            let result = self.inner.score_direct(decision);
+            self.gate.complete();
+            result
+        }
+
+        fn shutdown(&mut self) -> Result<(), CliError> {
+            self.inner.shutdown()
         }
     }
 
@@ -1242,16 +1331,14 @@ mod tests {
     fn test_server(
         admission: usize,
         timeout: Duration,
-        sleep: Duration,
         api_key: Option<&str>,
     ) -> (Router, WorkerHandle, Arc<Mutex<TestState>>) {
-        test_server_mode(admission, timeout, sleep, api_key, false, false)
+        test_server_mode(admission, timeout, api_key, false, false)
     }
 
     fn test_server_mode(
         admission: usize,
         timeout: Duration,
-        sleep: Duration,
         api_key: Option<&str>,
         require_shared: bool,
         supports_shared: bool,
@@ -1264,7 +1351,6 @@ mod tests {
                 factory_state.lock().unwrap().loads += 1;
                 let scorer = TestScorer {
                     state: factory_state,
-                    sleep,
                 };
                 if supports_shared {
                     Ok(Box::new(SharedTestScorer(scorer)) as Box<dyn DecisionScorer>)
@@ -1288,6 +1374,87 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
         });
         (app, worker, counters)
+    }
+
+    fn blocking_test_server(
+        admission_limit: usize,
+        timeout: Duration,
+    ) -> (
+        Router,
+        WorkerHandle,
+        Arc<Mutex<TestState>>,
+        Arc<BlockingGate>,
+        Arc<Semaphore>,
+    ) {
+        let counters = Arc::new(Mutex::new(TestState::default()));
+        let gate = Arc::new(BlockingGate::default());
+        let factory_state = Arc::clone(&counters);
+        let factory_gate = Arc::clone(&gate);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let (worker, startup) = WorkerHandle::spawn(
+            move || {
+                factory_state.lock().unwrap().loads += 1;
+                Ok(Box::new(BlockingTestScorer {
+                    inner: TestScorer {
+                        state: factory_state,
+                    },
+                    gate: factory_gate,
+                }) as Box<dyn DecisionScorer>)
+            },
+            32,
+            false,
+            Arc::clone(&shutdown),
+        )
+        .unwrap();
+        let admission = Arc::new(Semaphore::new(admission_limit));
+        let app = router(AppState {
+            sender: worker.sender(),
+            admission: Arc::clone(&admission),
+            ready: worker.ready(),
+            shutdown,
+            request_timeout: timeout,
+            api_key: None,
+            model: startup,
+            request_sequence: Arc::new(AtomicU64::new(1)),
+        });
+        (app, worker, counters, gate, admission)
+    }
+
+    async fn wait_for_gate(gate: Arc<BlockingGate>, entered: usize, completed: usize) {
+        let reached = tokio::task::spawn_blocking(move || gate.wait_for(entered, completed))
+            .await
+            .unwrap();
+        assert!(
+            reached,
+            "timed out waiting for scorer gate state entered={entered}, completed={completed}"
+        );
+    }
+
+    async fn wait_for_available_permits(admission: &Semaphore, expected: usize) {
+        let deadline = Instant::now() + BlockingGate::WAIT_LIMIT;
+        while admission.available_permits() != expected {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {expected} available admission permits"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+
+    fn current_thread_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    async fn wait_for_call(
+        task: tokio::task::JoinHandle<(StatusCode, HeaderMap, Value)>,
+    ) -> (StatusCode, HeaderMap, Value) {
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("timed out waiting for HTTP test task")
+            .unwrap()
     }
 
     async fn call(
@@ -1337,12 +1504,8 @@ mod tests {
     fn router_loads_once_serves_sdk_shapes_and_shuts_down_once() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let (app, worker, counters) = test_server(
-                MAX_ADMITTED_JOBS,
-                Duration::from_secs(2),
-                Duration::ZERO,
-                None,
-            );
+            let (app, worker, counters) =
+                test_server(MAX_ADMITTED_JOBS, Duration::from_secs(2), None);
             let (status, _, health) = call(
                 app.clone(),
                 Method::GET,
@@ -1443,7 +1606,6 @@ mod tests {
                 let (app, worker, counters) = test_server_mode(
                     MAX_ADMITTED_JOBS,
                     Duration::from_secs(2),
-                    Duration::ZERO,
                     None,
                     true,
                     true,
@@ -1474,7 +1636,6 @@ mod tests {
             let (app, worker, counters) = test_server_mode(
                 MAX_ADMITTED_JOBS,
                 Duration::from_secs(2),
-                Duration::ZERO,
                 None,
                 true,
                 false,
@@ -1502,7 +1663,6 @@ mod tests {
             let (app, worker, counters) = test_server_mode(
                 MAX_ADMITTED_JOBS,
                 Duration::from_secs(2),
-                Duration::ZERO,
                 None,
                 false,
                 false,
@@ -1531,12 +1691,8 @@ mod tests {
     fn auth_validation_and_router_errors_are_json_and_do_not_infer() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let (app, worker, counters) = test_server(
-                MAX_ADMITTED_JOBS,
-                Duration::from_secs(2),
-                Duration::ZERO,
-                Some("secret"),
-            );
+            let (app, worker, counters) =
+                test_server(MAX_ADMITTED_JOBS, Duration::from_secs(2), Some("secret"));
             let baseline = counters.lock().unwrap().calls;
             let (status, headers, body) = call(
                 app.clone(),
@@ -1661,14 +1817,11 @@ mod tests {
 
     #[test]
     fn deadline_cancels_queued_work_and_inflight_work_keeps_admission_charged() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let runtime = current_thread_runtime();
         runtime.block_on(async {
-            let (app, worker, counters) = test_server(
-                1,
-                Duration::from_millis(30),
-                Duration::from_millis(120),
-                None,
-            );
+            let request_timeout = Duration::from_secs(60);
+            let (app, worker, counters, gate, admission) = blocking_test_server(1, request_timeout);
+            let _release_on_drop = GateReleaseOnDrop(Arc::clone(&gate));
             let first_app = app.clone();
             let first = tokio::spawn(async move {
                 call(
@@ -1681,9 +1834,27 @@ mod tests {
                 )
                 .await
             });
-            tokio::time::sleep(Duration::from_millis(10)).await;
+
+            wait_for_gate(Arc::clone(&gate), 1, 0).await;
+            assert_eq!(admission.available_permits(), 0);
+            tokio::time::pause();
+            tokio::task::yield_now().await;
+            // This advances only Tokio's handler timeout. The worker's
+            // std::time::Instant deadline remains on the real clock.
+            tokio::time::advance(request_timeout + Duration::from_secs(1)).await;
+
+            let (status, _, body) = wait_for_call(first).await;
+            assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
+            assert_eq!(body["error_type"], "request_timeout");
+            assert_eq!(admission.available_permits(), 0);
+            assert_eq!(
+                counters.lock().unwrap().calls,
+                1,
+                "the warmup is the only completed scorer call while native work is gated"
+            );
+
             let (status, headers, body) = call(
-                app.clone(),
+                app,
                 Method::POST,
                 "/v1/systemone",
                 request_body("\"second\""),
@@ -1694,16 +1865,15 @@ mod tests {
             assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
             assert_eq!(headers[header::RETRY_AFTER], RETRY_AFTER_SECS);
             assert_eq!(body["error_type"], "overloaded");
-            let (status, _, body) = first.await.unwrap();
-            assert_eq!(status, StatusCode::GATEWAY_TIMEOUT);
-            assert_eq!(body["error_type"], "request_timeout");
-            tokio::time::sleep(Duration::from_millis(120)).await;
+
+            gate.release();
+            wait_for_gate(Arc::clone(&gate), 1, 1).await;
+            worker.shutdown().unwrap();
             assert_eq!(
                 counters.lock().unwrap().calls,
                 2,
                 "timed-out native work finishes, but no overloaded request is scored"
             );
-            worker.shutdown().unwrap();
         });
     }
 
@@ -1719,7 +1889,6 @@ mod tests {
                     factory_state.lock().unwrap().loads += 1;
                     Ok(Box::new(PanicScorer(TestScorer {
                         state: factory_state,
-                        sleep: Duration::ZERO,
                     })) as Box<dyn DecisionScorer>)
                 },
                 32,
@@ -1766,7 +1935,6 @@ mod tests {
                 move || {
                     Ok(Box::new(TerminalErrorScorer(TestScorer {
                         state: factory_state,
-                        sleep: Duration::ZERO,
                     })) as Box<dyn DecisionScorer>)
                 },
                 32,
@@ -1836,7 +2004,6 @@ mod tests {
                 move || {
                     let scorer = TestScorer {
                         state: factory_state,
-                        sleep: Duration::ZERO,
                     };
                     if panic_on_shutdown {
                         Ok(Box::new(PanicShutdownScorer(scorer)) as Box<dyn DecisionScorer>)
@@ -1864,10 +2031,11 @@ mod tests {
 
     #[test]
     fn disconnected_queued_request_is_dropped_before_inference() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let runtime = current_thread_runtime();
         runtime.block_on(async {
-            let (app, worker, counters) =
-                test_server(2, Duration::from_secs(1), Duration::from_millis(100), None);
+            let (app, worker, counters, gate, admission) =
+                blocking_test_server(2, Duration::from_secs(60));
+            let _release_on_drop = GateReleaseOnDrop(Arc::clone(&gate));
             let body = |state: &str| {
                 format!(r#"{{"state":"{state}","questions":{{"q":{{"type":"noul"}}}}}}"#)
             };
@@ -1879,7 +2047,8 @@ mod tests {
                 Some("application/json"),
                 None,
             ));
-            tokio::time::sleep(Duration::from_millis(5)).await;
+            wait_for_gate(Arc::clone(&gate), 1, 0).await;
+
             let queued = tokio::spawn(call(
                 app,
                 Method::POST,
@@ -1888,29 +2057,35 @@ mod tests {
                 Some("application/json"),
                 None,
             ));
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            wait_for_available_permits(&admission, 0).await;
+            tokio::task::yield_now().await;
+            assert!(!queued.is_finished(), "the admitted request remains queued");
             queued.abort();
-            assert_eq!(first.await.unwrap().0, StatusCode::OK);
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            let canceled = tokio::time::timeout(Duration::from_secs(5), queued)
+                .await
+                .expect("timed out waiting for the aborted HTTP test task")
+                .unwrap_err();
+            assert!(canceled.is_cancelled());
+
+            gate.release();
+            wait_for_gate(Arc::clone(&gate), 1, 1).await;
+            assert_eq!(wait_for_call(first).await.0, StatusCode::OK);
+            worker.shutdown().unwrap();
             assert_eq!(
                 counters.lock().unwrap().calls,
                 2,
                 "one warmup plus the first request; disconnected queued work is skipped"
             );
-            worker.shutdown().unwrap();
         });
     }
 
     #[test]
     fn queued_timeout_is_dropped_before_inference() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let runtime = current_thread_runtime();
         runtime.block_on(async {
-            let (app, worker, counters) = test_server(
-                2,
-                Duration::from_millis(30),
-                Duration::from_millis(100),
-                None,
-            );
+            let request_timeout = Duration::from_secs(60);
+            let (app, worker, counters, gate, admission) = blocking_test_server(2, request_timeout);
+            let _release_on_drop = GateReleaseOnDrop(Arc::clone(&gate));
             let first = tokio::spawn(call(
                 app.clone(),
                 Method::POST,
@@ -1919,7 +2094,8 @@ mod tests {
                 Some("application/json"),
                 None,
             ));
-            tokio::time::sleep(Duration::from_millis(5)).await;
+            wait_for_gate(Arc::clone(&gate), 1, 0).await;
+
             let second = tokio::spawn(call(
                 app,
                 Method::POST,
@@ -1928,15 +2104,34 @@ mod tests {
                 Some("application/json"),
                 None,
             ));
-            assert_eq!(first.await.unwrap().0, StatusCode::GATEWAY_TIMEOUT);
-            assert_eq!(second.await.unwrap().0, StatusCode::GATEWAY_TIMEOUT);
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            wait_for_available_permits(&admission, 0).await;
+            tokio::task::yield_now().await;
+            assert!(
+                !second.is_finished(),
+                "the second admitted request is queued"
+            );
+
+            tokio::time::pause();
+            tokio::task::yield_now().await;
+            // The HTTP handlers set their cancellation flags when Tokio time
+            // advances; the worker's std::time::Instant is not advanced here.
+            tokio::time::advance(request_timeout + Duration::from_secs(1)).await;
+            assert_eq!(wait_for_call(first).await.0, StatusCode::GATEWAY_TIMEOUT);
+            assert_eq!(wait_for_call(second).await.0, StatusCode::GATEWAY_TIMEOUT);
+            assert_eq!(
+                counters.lock().unwrap().calls,
+                1,
+                "neither gated nor queued inference completes before explicit release"
+            );
+
+            gate.release();
+            wait_for_gate(Arc::clone(&gate), 1, 1).await;
+            worker.shutdown().unwrap();
             assert_eq!(
                 counters.lock().unwrap().calls,
                 2,
                 "one warmup plus only the first noninterruptible inference"
             );
-            worker.shutdown().unwrap();
         });
     }
 }

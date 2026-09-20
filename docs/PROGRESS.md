@@ -433,3 +433,24 @@ Hosted main run [35489637122](https://github.com/codesoda/openjev-rs/actions/run
 Independent Astra review also identified missing full dependency notices in binary archives. Release packaging now includes attributed cargo-about notices for 276 pinned packages, exact native vendor notices, the official matching Rust 1.95.0 library copyright/permission bundle, and complete unmodified `.crate` source archives for the two MPL-2.0-only covered dependencies. Source archives are verified against Cargo.lock checksums. Parent reviewed and accepted this explicit source-availability/notice remediation for the present graph, not a blanket licensing exception. Network-free CI checks fail if lock, notices, source archives, metadata, native pin or toolchain pin drift. Added SHA-pinned standard Actions caching of Cargo sources and target outputs, keyed by target/toolchain/lock/workflow, to avoid repeating cold compilation for the release tag. No model cache or credentials are cached.
 
 Local gates after remediation: license/source checker, seven Python tests, actionlint, fmt, workspace clippy with warnings denied and 135 workspace tests all pass. Rust core/backend and reference files remain unchanged. Next required gate is a successful hosted main build, then tag publication and installed downloaded-artifact smoke.
+
+## Hosted macOS server-test flake remediation
+
+Hosted run 35492156731 on macOS 14 arm64 exposed a test-only startup race: two deadline tests used 30 ms wall-clock deadlines and 5–10 ms sleeps, so a loaded runner could expire the HTTP request before the fake scorer entered its first noninterruptible call. The resulting warmup-only count was 1 rather than the asserted warmup-plus-inference count of 2. Production timeout, cancellation, admission, scoring, and parity behavior is unchanged.
+
+The three timing-sensitive server tests now inject a blocking scorer gate backed by a condition variable. Tests wait for an explicit worker-entry notification before driving cancellation, keep native work blocked until an explicit release, and use a release-on-drop guard plus bounded 30-second synchronization waits so a failed assertion cannot strand `WorkerHandle::drop` joining a blocked owner thread. The disconnected-request test likewise waits until the first call entered and both admission permits are held before aborting the queued request; it no longer relies on 5/10/50 ms sleeps.
+
+The two HTTP deadline tests run on Tokio's current-thread runtime. They begin with a generous 60-second real request deadline, pause Tokio time only after the worker has entered the blocking scorer, then manually advance Tokio time to produce the real handler 504 and cancellation flag. This does not advance the worker's `std::time::Instant`; after explicit release, the first native call completes while canceled queued work is skipped. The admission-one test asserts the permit remains charged after the 504 and returns 429 with `Retry-After` until the gate is released. Tokio's `test-util` feature is enabled only as an `openjev-cli` dev dependency. `Cargo.lock` remains byte-for-byte unchanged at SHA-256 `fe4334a69de7f19123c9821226bb879112e490b724db2a5973f318edca4e71cf`.
+
+Validation after the test fix, all exit 0:
+
+- All ten `server::tests` passed 25/25 repeated serial iterations (`--test-threads=1`) and one additional high-concurrency run (`--test-threads=16`).
+- `cargo fmt --all -- --check`.
+- Workspace and default-member all-target Clippy with warnings denied.
+- Workspace tests passed twice, with `--test-threads=16` and `--test-threads=1`: 135 test functions each time, plus zero-test guarded/doc harnesses.
+- Default-member tests passed with `--test-threads=16`: 97 test functions, plus zero-test guarded/doc harnesses.
+- The third-party license/source checker passed for 276 packages and two source archives; `git diff --check`, unchanged `reference/`, and unchanged `Cargo.lock` checks passed.
+
+No native build, model access, commit, push, tag, release, or CI monitoring was performed.
+
+Parent/Astra inspected the complete deterministic-test diff: all Rust edits are inside `#[cfg(test)]`; Tokio test-util is dev-only and Cargo.lock is unchanged. Gate entry is acknowledged before advancing Tokio timeout time, queued admission is observed explicitly, and a drop guard releases the mock worker during unwinding. The tests retain 504/429, permit-retention, cancellation, and exact scorer-count assertions; no production deadline or native numerical gate changed. Parent independently reran fmt, warnings-denied workspace clippy, 135 workspace tests and the license/source checker successfully. Hosted run 35492156731 passed Linux; its failed macOS scheduling assertions are preserved under `docs/results/releases/ci-35492156731/`. Approved for another hosted run, not yet a release acceptance.
