@@ -1,0 +1,11 @@
+{
+  "binary_sha256": "b9999f65f936fdd17e193af90e57bd568c2888f98889b15c3ce98d1a319fc66a",
+  "http_checks": 8,
+  "resident_pid_unchanged": true,
+  "schema": "openjev-downloaded-release-smoke-v1",
+  "sdk_status": "passed",
+  "server_pid": 75379,
+  "source_sha": "bb23406606e423fb35f5e62fdf5f170a6b14ad3f",
+  "status": "passed",
+  "timestamp_utc": "2026-09-20T06:37:12Z"
+}

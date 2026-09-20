@@ -86,30 +86,55 @@ command envelopes.
 
 ## Tagged binary releases
 
-The repository now contains a tag-triggered GitHub Actions pipeline for Apple
-Silicon macOS 14+ (Metal) and x86-64 Ubuntu/glibc 2.35+ (CPU). A tag must be
-exactly `v` plus the Cargo workspace version. Both native jobs must pass before
-a GitHub Release is created; branch, pull-request, and manual runs upload only
-ordinary workflow artifacts.
+[`v0.1.0`](https://github.com/codesoda/openjev-rs/releases/tag/v0.1.0) is the
+first accepted binary release. The immutable tag points to
+`bb23406606e423fb35f5e62fdf5f170a6b14ad3f`: the
+[main CI run](https://github.com/codesoda/openjev-rs/actions/runs/35493609481)
+passed that exact commit, and the
+[tag CI run](https://github.com/codesoda/openjev-rs/actions/runs/35494477837)
+passed native macOS/Linux build, test, linkage, package, and publication jobs.
+The release provides Apple Silicon macOS 14+ (Metal) and x86-64 Linux/glibc
+2.35+ (CPU) archives plus `SHA256SUMS`.
+
+Both archives and `SHA256SUMS` were downloaded from the GitHub Release with
+`gh release download`; the checksum file, GitHub asset digests, package
+manifests, and macOS linkage were verified. The unchanged macOS payload is
+installed at
+`~/.local/share/openjev/releases/v0.1.0/openjev-v0.1.0-aarch64-apple-darwin/`,
+with `~/.local/bin/openjev` as its PATH-visible symlink. No pre-existing binary
+was replaced. The installed binary reports version `0.1.0` and has SHA-256
+`b9999f65f936fdd17e193af90e57bd568c2888f98889b15c3ce98d1a319fc66a`.
+
+A real offline cached-Qwen smoke of that installed downloaded binary passed on
+Apple M3 Pro with explicit Metal: eight raw HTTP checks, three equal decoded
+JSON Choice/Noul/Score response bodies from one resident load, wrong-key 401,
+unknown-model 404, unsupported-float 422, empty stdout, and clean SIGTERM. The
+pinned official `@typesafe-ai/sdk` 0.6.0 smoke also passed. Raw HTTP usage was
+313 input / 0 output tokens; the SDK request reported 338 / 0. Requests
+explicitly disclosed shared-to-serial full-prompt fallback. This is release
+identity, packaging, residency, and bounded protocol evidence—not an
+acceleration, performance, numerical-parity, Linux model-inference, Apple
+signing/notarization, or M6/M7 completion claim. Linux help/version/linkage and
+packaging ran in CI; the downloaded Linux archive was not executed on the local
+Mac.
 
 Each release archive contains the executable, the project license/attribution
 file, a complete `THIRD_PARTY_LICENSES.html` dependency notice bundle, the
 official Rust 1.95.0 library/runtime `RUST-COPYRIGHT-library.html` notices, the
 complete unmodified `colored-3.1.1.crate` and `option-ext-0.2.0.crate`
 MPL-2.0 covered-source archives, runtime documentation, and `BUILD-INFO.json`;
-model weights and cache data are never packaged. The release also has
-`SHA256SUMS`. CI executes the extracted
+model weights and cache data are never packaged. CI executes the extracted
 binary from a temporary directory outside the checkout and checks that native
 dynamic dependencies resolve only to operating-system libraries. The macOS
 binary embeds its Metal library, but is not Developer ID signed or Apple
 notarized. Running either packaged binary requires no Python, CMake, compiler,
 Xcode, or Homebrew.
 
-See [`docs/RELEASE.md`](docs/RELEASE.md) for targets, system requirements,
-checksum verification, package contents, and user-local installation. Release
-publication and a real downloaded-artifact Metal HTTP/official-SDK smoke remain
-separate gates: packaging CI alone is not evidence that the downloaded release
-passed the latter.
+See [`docs/RELEASE.md`](docs/RELEASE.md) for verification and installation, and
+[`docs/results/releases/v0.1.0-downloaded-metal/`](docs/results/releases/v0.1.0-downloaded-metal/)
+for retained acceptance evidence. The immutable release source is the tagged
+commit above; the evidence directory belongs to the separate documentation-only
+follow-up on `main`, not to the release tag.
 
 ## Build and install the M5 CLI
 

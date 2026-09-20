@@ -1,0 +1,221 @@
+[
+  {
+    "body": {
+      "status": "ok"
+    },
+    "headers": {
+      "connection": "close",
+      "content-length": "15",
+      "content-type": "application/json",
+      "date": "Sun, 20 Sep 2026 06:37:28 GMT"
+    },
+    "name": "health",
+    "status": 200
+  },
+  {
+    "body": {
+      "status": "ready"
+    },
+    "headers": {
+      "connection": "close",
+      "content-length": "18",
+      "content-type": "application/json",
+      "date": "Sun, 20 Sep 2026 06:37:28 GMT"
+    },
+    "name": "ready",
+    "status": 200
+  },
+  {
+    "body": {
+      "answers": {
+        "review": {
+          "noul": 0.98,
+          "type": "noul"
+        },
+        "route": {
+          "choice": "billing",
+          "confidence": 0.99,
+          "probabilities": {
+            "billing": 0.99,
+            "support": 0.01
+          },
+          "type": "choice"
+        },
+        "urgency": {
+          "confidence": 0.27,
+          "legend": {
+            "0": "low",
+            "1": "medium",
+            "2": "high"
+          },
+          "probabilities": {
+            "0": 0.52,
+            "1": 0.05,
+            "2": 0.44
+          },
+          "score": 0.92,
+          "type": "score"
+        }
+      },
+      "model": "qwen3-0.6b",
+      "usage": {
+        "input_tokens": 313,
+        "output_tokens": 0
+      }
+    },
+    "headers": {
+      "connection": "close",
+      "content-length": "377",
+      "content-type": "application/json",
+      "date": "Sun, 20 Sep 2026 06:37:29 GMT",
+      "x-openjev-execution": "requested=shared; effective=serial",
+      "x-openjev-fallback": "shared unavailable; serial full-prompt fallback",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    },
+    "name": "mixed-1",
+    "status": 200
+  },
+  {
+    "body": {
+      "answers": {
+        "review": {
+          "noul": 0.98,
+          "type": "noul"
+        },
+        "route": {
+          "choice": "billing",
+          "confidence": 0.99,
+          "probabilities": {
+            "billing": 0.99,
+            "support": 0.01
+          },
+          "type": "choice"
+        },
+        "urgency": {
+          "confidence": 0.27,
+          "legend": {
+            "0": "low",
+            "1": "medium",
+            "2": "high"
+          },
+          "probabilities": {
+            "0": 0.52,
+            "1": 0.05,
+            "2": 0.44
+          },
+          "score": 0.92,
+          "type": "score"
+        }
+      },
+      "model": "qwen3-0.6b",
+      "usage": {
+        "input_tokens": 313,
+        "output_tokens": 0
+      }
+    },
+    "headers": {
+      "connection": "close",
+      "content-length": "377",
+      "content-type": "application/json",
+      "date": "Sun, 20 Sep 2026 06:37:29 GMT",
+      "x-openjev-execution": "requested=shared; effective=serial",
+      "x-openjev-fallback": "shared unavailable; serial full-prompt fallback",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    },
+    "name": "mixed-2",
+    "status": 200
+  },
+  {
+    "body": {
+      "answers": {
+        "review": {
+          "noul": 0.98,
+          "type": "noul"
+        },
+        "route": {
+          "choice": "billing",
+          "confidence": 0.99,
+          "probabilities": {
+            "billing": 0.99,
+            "support": 0.01
+          },
+          "type": "choice"
+        },
+        "urgency": {
+          "confidence": 0.27,
+          "legend": {
+            "0": "low",
+            "1": "medium",
+            "2": "high"
+          },
+          "probabilities": {
+            "0": 0.52,
+            "1": 0.05,
+            "2": 0.44
+          },
+          "score": 0.92,
+          "type": "score"
+        }
+      },
+      "model": "qwen3-0.6b",
+      "usage": {
+        "input_tokens": 313,
+        "output_tokens": 0
+      }
+    },
+    "headers": {
+      "connection": "close",
+      "content-length": "377",
+      "content-type": "application/json",
+      "date": "Sun, 20 Sep 2026 06:37:30 GMT",
+      "x-openjev-execution": "requested=shared; effective=serial",
+      "x-openjev-fallback": "shared unavailable; serial full-prompt fallback",
+      "x-openjev-probability-status": "conditional option score; uncalibrated as decision confidence"
+    },
+    "name": "mixed-3",
+    "status": 200
+  },
+  {
+    "body": {
+      "error_type": "authentication_error",
+      "message": "a valid bearer token is required"
+    },
+    "headers": {
+      "connection": "close",
+      "content-length": "82",
+      "content-type": "application/json",
+      "date": "Sun, 20 Sep 2026 06:37:30 GMT",
+      "www-authenticate": "Bearer"
+    },
+    "name": "wrong-bearer",
+    "status": 401
+  },
+  {
+    "body": {
+      "error_type": "model_not_found",
+      "message": "requested model is not loaded by this server"
+    },
+    "headers": {
+      "connection": "close",
+      "content-length": "89",
+      "content-type": "application/json",
+      "date": "Sun, 20 Sep 2026 06:37:30 GMT"
+    },
+    "name": "unknown-model",
+    "status": 404
+  },
+  {
+    "body": {
+      "error_type": "validation_error",
+      "message": "serialization error at $.state.unsupportedFloat: floating-point number \"1.5\" is not supported"
+    },
+    "headers": {
+      "connection": "close",
+      "content-length": "141",
+      "content-type": "application/json",
+      "date": "Sun, 20 Sep 2026 06:37:30 GMT"
+    },
+    "name": "unsupported-float",
+    "status": 422
+  }
+]

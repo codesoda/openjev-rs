@@ -1,0 +1,48 @@
+{
+  "architecture": "arm64",
+  "backend": {
+    "llama_cpp_commit": "e79e4bf660e19f2ad851e06c6913f7a8c5852621",
+    "llama_cpp_rs_crate": "0.1.156",
+    "llama_cpp_sys_crate": "0.1.156",
+    "metal_library_embedded": true,
+    "native_libraries": "static"
+  },
+  "distribution": {
+    "apple_notarized": false,
+    "contains_model_weights": false,
+    "developer_id_signed": false
+  },
+  "features": [
+    "metal"
+  ],
+  "files_sha256": {
+    "LICENSE": "c3136ca3921483b44b01d66ca7a3c48bc01a45fdf09a4a164ecda427d312e22b",
+    "README.md": "de05a8735336a47dc805ae9f7d9a28287717f4089a86637c038687aaf2c19145",
+    "RUST-COPYRIGHT-library.html": "90567e2718bf7fd65a71a3a43c5596488e80e5f51ed02bfea6fec54458b5f3d1",
+    "SERVE.md": "a6db1ce964e696b83f1a5737d6740f7a354955112ed6f8a83c16f3169193cea7",
+    "THIRD_PARTY.md": "bf9542debe9bbaa9f2bc07107801026071eb227032b6c1aa89f11e5dadf5f712",
+    "THIRD_PARTY_LICENSES.html": "4c0f58ede1444cb85ce44895bcaf022e5da45d9da43e88a622c84441bbcfb2b6",
+    "colored-3.1.1.crate": "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34",
+    "openjev": "b9999f65f936fdd17e193af90e57bd568c2888f98889b15c3ce98d1a319fc66a",
+    "option-ext-0.2.0.crate": "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+  },
+  "name": "openjev",
+  "platform": "macos",
+  "rust_version": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "schema": "openjev-build-info-v1",
+  "source_ref": "refs/tags/v0.1.0",
+  "source_sha": "bb23406606e423fb35f5e62fdf5f170a6b14ad3f",
+  "system_requirements": {
+    "minimum_macos": "14.0",
+    "runtime_tools_not_required": [
+      "Homebrew",
+      "Xcode",
+      "CMake",
+      "Python"
+    ]
+  },
+  "tag": "v0.1.0",
+  "target": "aarch64-apple-darwin",
+  "version": "0.1.0",
+  "workflow_run_url": "https://github.com/codesoda/openjev-rs/actions/runs/35494477837"
+}

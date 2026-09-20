@@ -1,0 +1,16 @@
+{
+  "answers": [
+    "route",
+    "review",
+    "urgency"
+  ],
+  "baseURL": "http://127.0.0.1:54294",
+  "model": "qwen3-0.6b",
+  "sdk": "@typesafe-ai/sdk@0.6.0",
+  "source_commit": "66880ccded6cb642dc1809620c2b108c33730214",
+  "status": "passed",
+  "usage": {
+    "input_tokens": 338,
+    "output_tokens": 0
+  }
+}

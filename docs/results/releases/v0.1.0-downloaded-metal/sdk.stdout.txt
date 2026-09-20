@@ -1,0 +1,5 @@
+
+> smoke
+> node smoke.mjs
+
+{"sdk":"@typesafe-ai/sdk@0.6.0","source_commit":"66880ccded6cb642dc1809620c2b108c33730214","baseURL":"http://127.0.0.1:54294","model":"qwen3-0.6b","answers":["route","review","urgency"],"usage":{"input_tokens":338,"output_tokens":0},"status":"passed"}

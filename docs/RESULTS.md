@@ -248,3 +248,41 @@ No finalized numerical report was rerun or overwritten, no GGUF was downloaded o
 Parent code review fixed shared-requirement enforcement, worker failure/readiness/shutdown handling, and excessive repeated-state allocation before final smoke. Final fmt, workspace clippy/tests and CPU/Metal feature clippy/tests all passed; command/log evidence is in [`results/serve/20260920T031934Z-review-gates/`](results/serve/20260920T031934Z-review-gates/). CPU compilation/unit coverage is not a real CPU-server or Linux runtime smoke claim.
 
 This is protocol/residency evidence, **not a performance benchmark or successful shared-mode acceleration**. Shared requests still disclose serial fallback on every tested production profile. See [`SERVE.md`](SERVE.md) for supported wire limits and [`PROGRESS.md`](PROGRESS.md) for the separate, still-incomplete M6 benchmark work.
+
+## v0.1.0 — tagged release and downloaded-artifact acceptance
+
+Status: **accepted for the bounded release contract.** This acceptance covers immutable-source CI, two published binary packages, downloaded-asset integrity, macOS user-local installation, and a real installed-release Metal HTTP/official-SDK smoke. It does not complete M6 or M7.
+
+### Immutable release source and hosted CI
+
+- Tag [`v0.1.0`](https://github.com/codesoda/openjev-rs/releases/tag/v0.1.0), release target, `BUILD-INFO.json`, and both passing workflows identify source commit `bb23406606e423fb35f5e62fdf5f170a6b14ad3f`.
+- Main run [35493609481](https://github.com/codesoda/openjev-rs/actions/runs/35493609481) passed on that exact commit before tagging.
+- Tag run [35494477837](https://github.com/codesoda/openjev-rs/actions/runs/35494477837) passed the native macOS and Linux formatting/clippy/test/build/configuration/package jobs and the release publication job. The Linux CI package ran extracted help/version and linkage checks; it did not run Linux model inference.
+- The GitHub repository remained private. No release acceptance depends on making it public.
+
+The parent downloaded both `.tar.gz` assets and `SHA256SUMS` from the GitHub Release with `gh release download`. `SHA256SUMS`, GitHub's asset digests, safe archive manifests, payload manifests, and macOS linkage all matched:
+
+| Asset | Bytes | SHA-256 |
+|---|---:|---|
+| `openjev-v0.1.0-aarch64-apple-darwin.tar.gz` | 8,656,257 | `b2b26ee4ed33b584f01b22b5ebec5d38745c4cd53a59e2e9c8fd303031896251` |
+| `openjev-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` | 9,471,588 | `4430be0d48e77248b3e170bcb572f521f794fb5a39ea34e99f6285be37a9b8e6` |
+| `SHA256SUMS` | 222 | `3cf1f0d65b5379af1cce4c01c27dcc640331a3cb1ff5296431fa609acec34967` |
+
+The Linux archive was verified but not executed on the local Mac. There is no Linux model-inference claim.
+
+### Installed downloaded macOS artifact
+
+No pre-existing `openjev` command or binary was replaced. The unchanged payload was installed under
+`~/.local/share/openjev/releases/v0.1.0/openjev-v0.1.0-aarch64-apple-darwin/`, and `~/.local/bin/openjev` points to its executable. `~/.local/bin` was already on `PATH`. The installed executable reports `0.1.0`; its SHA-256 is `b9999f65f936fdd17e193af90e57bd568c2888f98889b15c3ce98d1a319fc66a`, exactly matching packaged `BUILD-INFO.json`.
+
+The installed release smoke started at `2026-09-20T06:37:12Z` and passed using offline cached Qwen3-0.6B from a temporary directory outside the checkout with explicit Metal and without DYLD/library/model-path overrides:
+
+- eight retained raw HTTP checks: health, readiness, three equal decoded JSON mixed Choice/Noul/Score response objects, wrong bearer 401, unknown model 404, and unsupported float 422;
+- one resident process and one pinned model load, embedded Metal library, `MTL0 (Apple M3 Pro)`, empty server stdout, and exit 0 after SIGTERM;
+- raw mixed-request usage of 313 input tokens and 0 output tokens;
+- pinned official `@typesafe-ai/sdk` 0.6.0 smoke passed Choice/Noul/Score fields, distributions and rounding, Score legend, model listing and token usage of 338 input / 0 output tokens;
+- every multi-question response disclosed `requested=shared; effective=serial` and fresh serial full-prompt fallback.
+
+This is bounded artifact identity, integrity, linkage, installation, residency, protocol, and SDK evidence. It is not a latency/throughput result, acceleration claim, shared/batch parity result, complete model/OS matrix, hosted Jev parity claim, or Apple Developer ID/notarization claim. M6 remains incomplete and M7 remains unfinished.
+
+Raw captures and the reproducible harness are in [`results/releases/v0.1.0-downloaded-metal/`](results/releases/v0.1.0-downloaded-metal/). The immutable release contains source commit `bb234066…ad3f`; this evidence was collected afterward and belongs to a later documentation commit. Independent Astra final acceptance review passed with no release blockers; the documentation-only follow-up does not change the tagged implementation or published artifacts.

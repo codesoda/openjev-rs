@@ -1,0 +1,8 @@
+{
+  "binary": "/Users/chrisraethke/.local/bin/openjev",
+  "resolved_binary": "/Users/chrisraethke/.local/share/openjev/releases/v0.1.0/openjev-v0.1.0-aarch64-apple-darwin/openjev",
+  "sha256": "b9999f65f936fdd17e193af90e57bd568c2888f98889b15c3ce98d1a319fc66a",
+  "version": "0.1.0",
+  "source_sha": "bb23406606e423fb35f5e62fdf5f170a6b14ad3f",
+  "path_contains_install_bin": true
+}

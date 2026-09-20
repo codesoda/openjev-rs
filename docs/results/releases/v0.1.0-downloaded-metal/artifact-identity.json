@@ -1,0 +1,8 @@
+{
+  "binary": "/Users/chrisraethke/.local/bin/openjev",
+  "binary_sha256": "b9999f65f936fdd17e193af90e57bd568c2888f98889b15c3ce98d1a319fc66a",
+  "build_info": "/Users/chrisraethke/.local/share/openjev/releases/v0.1.0/openjev-v0.1.0-aarch64-apple-darwin/BUILD-INFO.json",
+  "build_info_sha256": "a396c2f0e6edbcecbc14a6b92bbc215c8aaca55b52da6286c96f0f04b83ae8ad",
+  "resolved_binary": "/Users/chrisraethke/.local/share/openjev/releases/v0.1.0/openjev-v0.1.0-aarch64-apple-darwin/openjev",
+  "source_sha": "bb23406606e423fb35f5e62fdf5f170a6b14ad3f"
+}

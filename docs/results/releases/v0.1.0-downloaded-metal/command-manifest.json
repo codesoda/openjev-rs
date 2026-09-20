@@ -1,0 +1,67 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "/Users/chrisraethke/.local/share/openjev/releases/v0.1.0/openjev-v0.1.0-aarch64-apple-darwin/openjev",
+        "--version"
+      ],
+      "cwd": "/var/folders/p3/bc0bjl054mscbz5115ld49qw0000gn/T/openjev-release-smoke-zqmacqx9"
+    },
+    {
+      "argv": [
+        "/Users/chrisraethke/.local/share/openjev/releases/v0.1.0/openjev-v0.1.0-aarch64-apple-darwin/openjev",
+        "--help"
+      ],
+      "cwd": "/var/folders/p3/bc0bjl054mscbz5115ld49qw0000gn/T/openjev-release-smoke-zqmacqx9"
+    },
+    {
+      "argv": [
+        "/Users/chrisraethke/.local/share/openjev/releases/v0.1.0/openjev-v0.1.0-aarch64-apple-darwin/openjev",
+        "--serve",
+        "--offline",
+        "--model",
+        "qwen3-0.6b",
+        "--device",
+        "metal",
+        "--cache-dir",
+        "/Users/chrisraethke/.cache/openjev",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "54294",
+        "--api-key-env",
+        "OPENJEV_RELEASE_SMOKE_KEY"
+      ],
+      "cwd": "/var/folders/p3/bc0bjl054mscbz5115ld49qw0000gn/T/openjev-release-smoke-zqmacqx9",
+      "env": {
+        "OPENJEV_RELEASE_SMOKE_KEY": "<ephemeral-redacted>"
+      }
+    },
+    {
+      "argv": [
+        "/Users/chrisraethke/.volta/tools/image/node/24.15.0/bin/npm",
+        "ci",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund"
+      ],
+      "cwd": "/Users/chrisraethke/projects/openjev-rs/scripts/sdk-compat"
+    },
+    {
+      "argv": [
+        "/Users/chrisraethke/.volta/tools/image/node/24.15.0/bin/npm",
+        "run",
+        "smoke"
+      ],
+      "cwd": "/Users/chrisraethke/projects/openjev-rs/scripts/sdk-compat",
+      "env": {
+        "OPENJEV_API_KEY": "<ephemeral-redacted>",
+        "OPENJEV_BASE_URL": "http://127.0.0.1:54294"
+      }
+    }
+  ],
+  "environment_removed": [
+    "LIBRARY_PATH"
+  ],
+  "timestamp_utc": "2026-09-20T06:37:12Z"
+}

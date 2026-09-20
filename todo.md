@@ -6,17 +6,50 @@ option logits from a frozen open LLM** in one forward pass — no generation.
 Ships as a library + an `openjev` CLI that takes state/question/options from
 args or stdin and prints JSON to stdout.
 
-Status: **nothing implemented yet**. This file is the brief. `reference/` holds
-the upstream material the design is derived from.
+Original brief status (historical): **nothing implemented yet**. This file
+retains that brief; `reference/` holds the upstream material it was derived
+from.
 
-Phase A update: design/source adjudication is in [`docs/PLAN.md`](docs/PLAN.md),
-reviewed by parent/Astra and approved for M1. All six section-8 choices and failure policies are
-resolved there; runtime gates remain unrun. Published llama crates are 0.1.156
-(0.1.157 is currently Git-only), with the expected e79e4bf6 native pin. The plan
-also corrects the brief's empty-option validation assumption, prediction-file
-cardinality (252; select authored144 by ID), build override assumptions, and
-chat-template API limitations. [`docs/PROGRESS.md`](docs/PROGRESS.md) records
-actual evidence. M1–M5 are approved and committed; M3's strict authored144 plus perturbations108 prompt/token/slot gates pass. Partial M6 evaluation/benchmark and compact-output work is checkpointed at `1dcfad3` and remains incomplete. The separately requested resident `openjev --serve` Jev-compatible HTTP extension has passed parent/Astra review, real Metal HTTP/official SDK smoke tests, and workspace/CPU/Metal checks; evidence is in `docs/results/serve/`. Tag release CI and deterministic package validation are now implemented locally under `.github/workflows/ci-release.yml` and `scripts/release.py`, but no tag, GitHub Release, installation, or downloaded-artifact smoke is claimed yet. It does not complete M6 or the remaining M7 algorithms and does not enable any failed shared/batch profile. **The full original brief below is preserved**, not rewritten as if later runtime validation had occurred.
+Phase A historical note: [`docs/PLAN.md`](docs/PLAN.md) was reviewed by
+parent/Astra and approved for M1 after resolving all six section-8 choices and
+failure policies. At that boundary runtime gates were still unrun. The
+published `llama-cpp-2`/`llama-cpp-sys-2` crates were 0.1.156 (0.1.157 was
+Git-only), with bundled native commit
+`e79e4bf660e19f2ad851e06c6913f7a8c5852621`. Phase A also corrected the
+brief's empty-option validation assumption, the 252-row prediction cardinality
+(with authored144 selected by semantic ID), build-override assumptions, and
+chat-template API limitations. Later sections record the subsequent runtime
+work; these source adjudications remain historical facts rather than current
+pending questions.
+
+Current status: design/source adjudication is in [`docs/PLAN.md`](docs/PLAN.md),
+and [`docs/PROGRESS.md`](docs/PROGRESS.md) records actual implementation and
+runtime evidence. M1–M5 are approved and committed; M3's strict authored144 plus
+perturbations108 prompt/token/slot gates pass. Partial M6 evaluation/benchmark
+and compact-output work is checkpointed at `1dcfad3` and remains incomplete.
+The resident `openjev --serve` extension has passed parent/Astra review and real
+Metal HTTP/official SDK smoke tests. Tagged release `v0.1.0` is published from
+exact source `bb23406606e423fb35f5e62fdf5f170a6b14ad3f`; its main and tag CI
+runs passed, both release archives were downloaded and verified, and the
+installed unchanged macOS artifact passed the bounded offline Metal HTTP/SDK
+acceptance gate. This does not complete M6, M7, or the full brief and does not
+enable any failed shared/batch profile. Independent Astra final release review
+passed; the evidence write-up is a separate documentation-only follow-up on
+`main`, not part of the immutable release tag. **The full original brief below is preserved**, not
+rewritten as if all later milestones were complete.
+
+### Focused v0.1.0 release checklist (not full-brief completion)
+
+- [x] Exact source `bb234066…ad3f` passed hosted main CI run 35493609481.
+- [x] Immutable tag `v0.1.0` points to that source; tag run 35494477837 passed native macOS/Linux build, test, linkage, packaging, and publication.
+- [x] Downloaded both release archives plus `SHA256SUMS` with `gh release download`; verified checksum-file and GitHub asset digests, safe manifests, payload hashes, and macOS linkage.
+- [x] Installed the unchanged macOS payload under the versioned user-local release directory with a PATH-visible symlink; replaced no pre-existing binary.
+- [x] Matched installed version/source/binary SHA-256 and passed real offline cached-Qwen explicit-Metal HTTP checks with one resident load, empty stdout, and clean SIGTERM.
+- [x] Passed pinned official SDK 0.6.0 Choice/Noul/Score smoke and 401/404/422 checks; retained explicit serial-fallback disclosure.
+- [x] Retained raw evidence and final passing local documentation/evidence gate logs under `docs/results/releases/v0.1.0-downloaded-metal/`.
+- [x] Independent Astra final release acceptance review passed with no blockers; preserve the reviewed evidence in this separate documentation-only follow-up.
+- [ ] Finish and review remaining M6 work.
+- [ ] Implement and review remaining M7 work.
 
 ---
 
