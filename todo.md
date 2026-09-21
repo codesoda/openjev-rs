@@ -1,5 +1,11 @@
 # openjev-rs — TODO / implementation brief
 
+> **Scope change (library-only repository).** The `openjev` CLI, `serve` HTTP
+> server, demo, installer and binary release pipeline described below were moved
+> to [SystemOne](https://github.com/codesoda/systemone) (`s1`). This repository
+> now ships only `openjev-core` and `openjev-llama`, consumed by Git revision.
+> Everything below is retained as history and requirements context.
+
 Rust port of the **openjev.com / SemIf** idea: a "System One" decision model
 (Jev-style `Choice` / `Noul` / `Score` primitives) built by reading **next-token
 option logits from a frozen open LLM** in one forward pass — no generation.

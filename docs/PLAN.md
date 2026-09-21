@@ -1,5 +1,11 @@
 # openjev-rs — Phase A implementation contract
 
+> **Scope change (library-only repository).** The `openjev` CLI, `serve` HTTP
+> server, demo, installer and binary release pipeline described below were moved
+> to [SystemOne](https://github.com/codesoda/systemone) (`s1`). This repository
+> now ships only `openjev-core` and `openjev-llama`, consumed by Git revision.
+> Everything below is retained as history and requirements context.
+
 Status: **design only; no Rust implementation, native build, GGUF download, or runtime validation yet.** This document resolves the choices in `todo.md` before M1. The original brief remains the requirements ground truth. This contract corrects source/API assumptions with evidence; it does not override user requirements or relax acceptance gates. Reference material is read-only. Parent/Astra review accepted this plan, with the M2 continue-on-load-failure policy clarified below; commit precedes M1.
 
 ## 1. Scope and invariants

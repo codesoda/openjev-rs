@@ -614,3 +614,30 @@ Actionlint, license/source verification and whitespace checks. Publication is
 still pending hosted CI, then an immutable tag build and downloaded-artifact
 verification. No release acceptance or replacement of the installed local
 build is claimed at this preparation point.
+
+## Library-only repository: CLI and HTTP API moved to SystemOne
+
+The `openjev-cli` crate (CLI subcommands, `serve` Jev HTTP adapter, demo,
+probe orchestration, eval/bench commands), `demo/`, `install.sh`, the binary
+release/packaging/license-bundle scripts, their tests, the CLI output schemas
+(`commands`, `compact`, `eval`, `bench`, `jev-http`) and the SDK compatibility
+smoke were removed. Their replacement is
+[SystemOne](https://github.com/codesoda/systemone): `s1 serve` / `s1 run` /
+`s1 call` provide the Jev-compatible HTTP API and one-shot execution over a
+backend-neutral `DecisionHost` trait, `s1 openjev models pull|path` and
+`s1 openjev probe` carry the OpenJev-specific tooling, and SystemOne pins
+`openjev-core` / `openjev-llama` by Git revision. The uncommitted Discuss-style
+layered CLI configuration work was carried over into SystemOne's config crate
+rather than committed here.
+
+Retained: `openjev-core`, `openjev-llama` (registry, verified cache, probe
+receipts, native engine), `manifests/`, `fixtures/`,
+`schemas/readout-v1.schema.json`, `reference/`, evidence under `docs/results/`,
+and the historical plan/brief/results documents. Library behaviour, parity
+gates and pinned dependencies are unchanged; only CLI-only workspace
+dependencies (axum, clap, tokio, reqwest, toml, tower, http-body-util, anyhow)
+were dropped from the workspace manifest and lockfile. CI now runs fmt, clippy
+and tests for the default and native feature sets instead of packaging
+binaries. Eval and bench commands are not yet re-exposed in SystemOne; the
+`openjev_core::eval` library API remains available.
+

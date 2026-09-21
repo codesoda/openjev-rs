@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64-metal
+            runner: macos-14
+            native_features: openjev-llama/metal
+          - name: linux-x86_64-cpu
+            runner: ubuntu-22.04
+            native_features: openjev-llama/native
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: 1.95.0
+      CARGO_BUILD_JOBS: "2"
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Install Rust 1.95.0 components
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup toolchain install 1.95.0 --no-self-update --component rustfmt --component clippy
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: openjev-lib-v1-${{ matrix.name }}-rust195-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.github/workflows/ci.yml') }}
+
+      - name: Install Linux native build prerequisites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential clang libclang-dev cmake pkg-config
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Default (backend-disabled) clippy and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked --workspace --all-targets
+
+      - name: Native clippy and tests (no model downloads)
+        shell: bash
+        env:
+          NATIVE_FEATURES: ${{ matrix.native_features }}
+        run: |
+          set -euo pipefail
+          cargo clippy --locked --workspace --all-targets --features "$NATIVE_FEATURES" -- -D warnings
+          cargo test --locked --workspace --all-targets --features "$NATIVE_FEATURES"
