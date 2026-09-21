@@ -22,8 +22,8 @@ openjev serve --host 0.0.0.0 --api-key-env OPENJEV_API_KEY
 The default listener is `127.0.0.1:8080`. TLS belongs at a trusted reverse
 proxy. Wildcard CORS is not enabled. `serve` cannot be combined with another
 command or decision-output flags. Put server options such as `--host` and
-`--port` after `serve`. The former `--serve` flag is not supported in current
-source builds; historical v0.1.0 release artifacts still use that flag. Existing model, cache, offline, device,
+`--port` after `serve`. Since v0.2.0, the former `--serve` flag is not supported;
+historical v0.1.0 release artifacts still use that flag. Existing model, cache, offline, device,
 thread, context, batch, sequence, and `--require-shared` settings still apply.
 Startup binds first, then loads and warms the model; readiness and accepting
 begin only after load/warmup succeeds. stdout remains empty. Diagnostics go to

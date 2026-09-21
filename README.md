@@ -2,7 +2,7 @@
 
 # openjev-rs
 
-<a href="docs/demo.mp4"><img src="docs/demo.gif" alt="Watch OpenJev start a local server, then run eight examples showing inputs and typed JSON results" width="100%"></a>
+<a href="docs/demo.md"><img src="docs/demo.gif" alt="OpenJev walkthrough: start the server, send two curl requests, and see typed JSON responses" width="100%"></a>
 
 **Local typed decisions for scripts, applications, and AI agents.**
 
@@ -94,7 +94,7 @@ The installer downloads the latest public release directly with `curl`. To pin a
 version:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/codesoda/openjev-rs/main/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://raw.githubusercontent.com/codesoda/openjev-rs/main/install.sh | sh -s -- --version v0.2.0
 ```
 
 From a local checkout, `sh install.sh` performs the same prebuilt installation—it
@@ -246,8 +246,8 @@ any failed batch row), **2** invalid arguments/input. `--pretty` is not valid fo
 
 Start a resident server with the cached model:
 
-Source builds use the `serve` subcommand (no `--serve` alias). The older v0.1.0
-release uses `--serve` and does not contain the demo command.
+Since v0.2.0, use the `serve` subcommand (no `--serve` alias). If upgrading from
+v0.1.0, replace `openjev --serve` with `openjev serve`.
 
 ```sh
 openjev serve --offline --model qwen3-0.6b \
@@ -287,8 +287,8 @@ openjev demo --base-url http://127.0.0.1:8080/v1 --timeout-secs 180
 ```
 
 `--model` optionally names the model expected on the server; it does not load or
-switch models. The demo requires a build containing this feature (it is not in
-v0.1.0). Run the server and demo in separate terminals, not with `&&`: the server
+switch models. The demo is available from v0.2.0. Run the server and demo in
+separate terminals, not with `&&`: the server
 stays in the foreground until stopped.
 
 **Or call the API directly:**

@@ -576,3 +576,41 @@ README now contains only a GIF linked directly to the MP4; removed the extra
 caption and auxiliary links. Reproduction and honesty notes remain in
 `demo/README.md`. No predictions were changed or replaced, no weights downloaded,
 and no public release created.
+
+### Staged curl walkthrough and demo landing page
+
+At the user's request, replaced the live eight-example recording with a staged
+59.12-second walkthrough: start the server, show a Choice curl request and its
+illustrative response, clear the view, then show a Noul curl request/response.
+Both commands and results stay together on screen; requests pause for 8 seconds
+and results for 10 seconds. The screen and documentation explicitly identify
+responses as illustrative, including probabilities, usage and startup messages.
+The renderer runs no server, model, curl command or inference.
+
+README's GIF now links to `docs/demo.md`. The new page contains a clickable video
+preview and copyable commands with an explanation of each example underneath.
+GitHub's Markdown API confirmed that inline `<video>` is stripped, so the page
+uses an image link to the MP4 rather than a nonfunctional embedded player.
+`demo/scenes.json` is the recording fixture; four tests check curl parsing,
+request/answer consistency, displayed JSON, docs consistency and pacing.
+Removed the now-unused live presenter and its tests; the real Rust CLI is
+unchanged. ShellCheck, Python tests, VHS rendering and FFprobe pass. Reviewed
+frames for both request/result scenes; GIF is ~257 KiB and MP4 ~445 KiB at
+1280×960. No new installation, model download or public release was performed.
+
+## v0.2.0 release preparation
+
+Prepared v0.2.0 for the breaking `--serve` → `serve` CLI change, eight-example
+HTTP demo (including exact requests), public installer, and revised walkthrough.
+Versioned release notes in `docs/releases/v0.2.0.md` are appended to automated
+GitHub releases; CI now also runs the four recording-fixture tests. README and
+HTTP docs explain the upgrade. Regenerated license notices for the workspace
+version bump; dependency versions are unchanged.
+
+Local gates passed: formatting, warnings-denied workspace/all-target Clippy,
+142 workspace Rust tests, 33 installer/packaging/native-build Python tests,
+four demo tests, tag/version validation, ShellCheck, VHS tape validation,
+Actionlint, license/source verification and whitespace checks. Publication is
+still pending hosted CI, then an immutable tag build and downloaded-artifact
+verification. No release acceptance or replacement of the installed local
+build is claimed at this preparation point.

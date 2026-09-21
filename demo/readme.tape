@@ -1,14 +1,13 @@
-# Run bash demo/record.sh from the repo root. No model is preloaded.
+# Run bash demo/record.sh from the repo root. Staged; no inference is executed.
 Output docs/demo.gif
 Output docs/demo.mp4
 
-Require openjev
 Require python3
 Set Shell bash
 Set FontSize 20
 Set FontFamily "Menlo"
 Set Width 1280
-Set Height 860
+Set Height 960
 Set Padding 28
 Set Theme "Catppuccin Mocha"
 Set WindowBar Colorful
@@ -19,11 +18,11 @@ Hide
 Type `export PS1='$ '; clear`
 Enter
 Show
-# Script types the exact commands it runs, and owns the real server/client.
+# Script types illustrative commands and responses; it does not execute them.
 Hide
 Type "python3 demo/session.py"
 Enter
 Show
-Sleep 135s
-Wait+Screen /8 HTTP requests complete/
-Sleep 5s
+Sleep 56s
+Wait+Screen /WALKTHROUGH COMPLETE/
+Sleep 4s

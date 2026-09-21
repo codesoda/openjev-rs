@@ -1,0 +1,27 @@
+[
+  {
+    "title": "1 / Route a support ticket (Choice)",
+    "body": "{\n    \"state\": \"I was charged twice for my subscription.\",\n    \"questions\": {\n      \"route\": {\n        \"type\": \"choice\", \"instructions\": \"Which team should handle this?\",\n        \"criteria\": {\"billing\": \"Payments\", \"support\": \"Technical issues\"}\n      }\n    }\n  }",
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {
+        "route": {
+          "type": "choice",
+          "choice": "billing",
+          "confidence": 0.92,
+          "probabilities": {"billing": 0.96, "support": 0.04}
+        }
+      },
+      "usage": {"input_tokens": 120, "output_tokens": 0}
+    }
+  },
+  {
+    "title": "2 / Detect a refund request (Noul)",
+    "body": "{\n    \"state\": \"The parcel never arrived. Please refund my payment.\",\n    \"questions\": {\n      \"refund\": {\n        \"type\": \"noul\", \"instructions\": \"Does the customer request a refund?\"\n      }\n    }\n  }",
+    "response": {
+      "model": "qwen3-0.6b",
+      "answers": {"refund": {"type": "noul", "noul": 0.97}},
+      "usage": {"input_tokens": 96, "output_tokens": 0}
+    }
+  }
+]

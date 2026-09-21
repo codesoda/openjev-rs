@@ -117,6 +117,7 @@ jobs:
           python3 scripts/release.py validate-ref --ref "$GITHUB_REF"
           python3 scripts/check_third_party_licenses.py
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+          python3 -m unittest discover -s demo -p 'test_*.py' -v
 
       - name: Check formatting
         shell: bash
@@ -256,6 +257,10 @@ jobs:
             "" \
             "Includes Apple Silicon macOS 14+ Metal and x86-64 glibc 2.35+ CPU archives. No model weights are included. The macOS binary is not Developer ID signed or Apple notarized." \
             > "$notes"
+          if [[ -f "docs/releases/$TAG.md" ]]; then
+            printf '\n' >> "$notes"
+            cat "docs/releases/$TAG.md" >> "$notes"
+          fi
           gh release create "$TAG" \
             "dist/openjev-v${version}-aarch64-apple-darwin.tar.gz" \
             "dist/openjev-v${version}-x86_64-unknown-linux-gnu.tar.gz" \
